@@ -219,3 +219,6 @@ __marimo__/
 
 # Runtime shopping profile state
 data/shopping-profile.json
+
+# Runtime retailer browser profiles
+data/browser-profiles/
