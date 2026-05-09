@@ -5,6 +5,7 @@ export const ACTIVE_CARTS_STRIP_EMPTY_HTML = "";
 export const RETAILER_CART_URLS = Object.freeze({
   Asket: "https://www.asket.com/en-dk/cart",
   ASOS: "https://www.asos.com/basket/",
+  "About You": "https://www.aboutyou.lv/basket",
   "Zalando.lv": "https://www.zalando.lv/cart/",
 });
 
