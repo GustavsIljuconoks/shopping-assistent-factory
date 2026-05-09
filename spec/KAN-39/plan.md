@@ -16,6 +16,7 @@
 - [x] Add focused tests for sequential staging, successful-stage cart refreshes, and zero-selection no-op behavior.
 - [x] Run syntax checks and tests.
 - [x] Write Jira-facing response.
+- [x] Continuation run: confirmed the implementation is present on `main` after PR #15 merge and reran focused/full verification.
 
 ## Notes
 
@@ -23,6 +24,13 @@
 - `handleShoppingChatMessage()` still only searches and renders proposals; it does not call the staging recipe.
 
 ## Verification
+
+- `node --check src/shopping-chat-flow.mjs`
+- `node --check test/shopping-chat-flow.test.mjs`
+- `node --test test/shopping-chat-flow.test.mjs`
+- `node --test test/*.test.mjs`
+
+Continuation verification on 2026-05-09:
 
 - `node --check src/shopping-chat-flow.mjs`
 - `node --check test/shopping-chat-flow.test.mjs`
