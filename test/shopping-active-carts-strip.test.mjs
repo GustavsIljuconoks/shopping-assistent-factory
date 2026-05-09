@@ -78,6 +78,21 @@ test("renders a sticky active-carts strip with count, time, and default-browser 
   assert.match(html, /data-open-with="default-browser"/);
 });
 
+test("uses the default About You cart URL when recording staged items", () => {
+  const activeCarts = new Map();
+  const row = recordStagedCartItem(activeCarts, {
+    retailer: "About You",
+    stagedAt: "2026-05-09T13:10:00.000Z",
+  });
+
+  assert.deepEqual(row, {
+    cartUrl: "https://www.aboutyou.lv/basket",
+    itemCount: 1,
+    lastStagedAt: "2026-05-09T13:10:00.000Z",
+    retailer: "About You",
+  });
+});
+
 test("uses the default Zalando.lv cart URL when recording staged items", () => {
   const activeCarts = new Map();
   const row = recordStagedCartItem(activeCarts, {
