@@ -78,6 +78,21 @@ test("renders a sticky active-carts strip with count, time, and default-browser 
   assert.match(html, /data-open-with="default-browser"/);
 });
 
+test("uses the default Zalando.lv cart URL when recording staged items", () => {
+  const activeCarts = new Map();
+  const row = recordStagedCartItem(activeCarts, {
+    retailer: "Zalando.lv",
+    stagedAt: "2026-05-09T13:10:00.000Z",
+  });
+
+  assert.deepEqual(row, {
+    cartUrl: "https://www.zalando.lv/cart/",
+    itemCount: 1,
+    lastStagedAt: "2026-05-09T13:10:00.000Z",
+    retailer: "Zalando.lv",
+  });
+});
+
 test("publishes and clears the chat strip as active carts appear and disappear", async () => {
   const events = [];
   const chat = {

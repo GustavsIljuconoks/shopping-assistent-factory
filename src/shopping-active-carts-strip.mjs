@@ -4,6 +4,7 @@ export const ACTIVE_CARTS_STRIP_EMPTY_HTML = "";
 
 export const RETAILER_CART_URLS = Object.freeze({
   Asket: "https://www.asket.com/en-dk/cart",
+  "Zalando.lv": "https://www.zalando.lv/cart/",
 });
 
 export function createActiveCartsState({ entries = [], now = () => new Date() } = {}) {

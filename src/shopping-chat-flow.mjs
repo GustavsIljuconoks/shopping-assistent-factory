@@ -241,6 +241,9 @@ export function createProfileConfirmationCard(profileFact) {
       profileKey: normalized.profileKey,
       value: normalized.value,
     },
+  };
+}
+
 export async function stageSelectedAsketCandidates({
   selectedCandidates,
   page,
