@@ -1,3 +1,4 @@
+import { updateShoppingProfile } from "./shopping-profile.mjs";
 import { ASKET_RETAILER, stageAsketCartItem } from "./asket-cart-staging-recipe.mjs";
 
 export const SHOPPING_CHAT_LOW_CONFIDENCE_MESSAGE =
@@ -5,6 +6,7 @@ export const SHOPPING_CHAT_LOW_CONFIDENCE_MESSAGE =
 export const ASKET_CART_URL = "https://www.asket.com/cart";
 
 const DEFAULT_MIN_PROPOSAL_CONFIDENCE = 0.7;
+const DEFAULT_PROFILE_CONFIRMATION_MESSAGE = "Got it. I saved that to your shopping profile.";
 
 const GARMENT_CLASS_ALIASES = Object.freeze({
   accessories: ["accessory", "accessories", "bag", "belt", "cap", "hat", "scarf"],
@@ -21,6 +23,7 @@ const GARMENT_CLASS_ALIASES = Object.freeze({
     "trouser",
     "trousers",
   ],
+  dresses: ["dress", "dresses"],
   outerwear: ["coat", "jacket", "outerwear", "parka"],
   shoes: [
     "boot",
@@ -54,12 +57,42 @@ const SHOPPING_INTENT_TERMS = Object.freeze([
 export async function handleShoppingChatMessage({
   message,
   profile,
+  pendingProfileField,
+  confirmedProfileField,
+  profilePath,
+  updateProfile = updateShoppingProfile,
   searchTool,
+  renderConfirmationCard = createProfileConfirmationCard,
   renderProposalCard,
   chat,
   minProposalConfidence = DEFAULT_MIN_PROPOSAL_CONFIDENCE,
 } = {}) {
   const text = normalizeMessage(message);
+
+  if (confirmedProfileField) {
+    return confirmProfileField({
+      chat,
+      confirmedProfileField,
+      profilePath,
+      updateProfile,
+    });
+  }
+
+  if (pendingProfileField) {
+    const pendingFact = extractPendingProfileFact(text, pendingProfileField, profile);
+    if (!pendingFact) {
+      return askClarification(chat, createProfileQuestion(pendingProfileField));
+    }
+
+    const confirmationCard = await renderConfirmationCard(pendingFact);
+    await publishConfirmationCard(chat, confirmationCard, pendingFact);
+    return {
+      action: "confirmation_card",
+      confirmationCard,
+      pendingProfileField: pendingFact,
+    };
+  }
+
   const shoppingIntent = detectShoppingIntent(text);
 
   if (!shoppingIntent.detected) {
@@ -68,6 +101,14 @@ export async function handleShoppingChatMessage({
       reason: "no_shopping_intent",
       shoppingIntent,
     };
+  }
+
+  const missingBootstrapField = profile ? findMissingBootstrapField(profile) : undefined;
+  if (missingBootstrapField) {
+    return askClarification(chat, {
+      ...createProfileQuestion(missingBootstrapField),
+      shoppingIntent,
+    });
   }
 
   const garmentClass = extractGarmentClass(text);
@@ -146,6 +187,59 @@ export async function handleShoppingChatMessage({
   };
 }
 
+export function findMissingBootstrapField(profile) {
+  if (!profile?.country) {
+    return {
+      field: "country",
+      label: "country",
+      profileKey: "country",
+    };
+  }
+
+  if (!profile?.sizes?.tops?.value) {
+    return {
+      field: "topSize",
+      garmentClass: "tops",
+      label: "top size",
+      profileKey: "sizes.tops",
+    };
+  }
+
+  if (!profile?.sizes?.shoes?.value) {
+    return {
+      field: "shoeSizeEu",
+      garmentClass: "shoes",
+      label: "EU shoe size",
+      profileKey: "sizes.shoes",
+    };
+  }
+
+  if (!resolveProfileBudget(profile, "default")) {
+    return {
+      field: "roughBudget",
+      label: "rough budget",
+      profileKey: "budgetAnchors.default",
+    };
+  }
+
+  return undefined;
+}
+
+export function createProfileConfirmationCard(profileFact) {
+  const normalized = normalizeProfileFact(profileFact);
+  return {
+    type: "profile_confirmation_card",
+    title: `Confirm ${normalized.label}`,
+    body: formatProfileFactValue(normalized),
+    confirmLabel: "Confirm",
+    value: normalized.value,
+    profileField: {
+      field: normalized.field,
+      garmentClass: normalized.garmentClass,
+      label: normalized.label,
+      profileKey: normalized.profileKey,
+      value: normalized.value,
+    },
 export async function stageSelectedAsketCandidates({
   selectedCandidates,
   page,
@@ -288,6 +382,263 @@ export function extractPriceCeiling(message, profile) {
   };
 }
 
+function extractPendingProfileFact(message, profileField, profile) {
+  const field = normalizeProfileField(profileField);
+  const text = normalizeMessage(message);
+
+  switch (field.field) {
+    case "country": {
+      const country = extractCountryCode(text);
+      return country
+        ? normalizeProfileFact({
+            ...field,
+            value: country,
+          })
+        : undefined;
+    }
+    case "topSize": {
+      const size = extractExplicitSize(text) ?? extractLooseSize(text);
+      return size
+        ? normalizeProfileFact({
+            ...field,
+            value: {
+              ...(size.system ? { system: size.system } : {}),
+              value: size.value,
+            },
+          })
+        : undefined;
+    }
+    case "shoeSizeEu": {
+      const size = extractExplicitSize(text) ?? extractLooseShoeSize(text);
+      return size
+        ? normalizeProfileFact({
+            ...field,
+            value: {
+              system: "EU",
+              value: size.value,
+            },
+          })
+        : undefined;
+    }
+    case "roughBudget": {
+      const budget = extractPriceCeiling(text, profile) ?? extractLooseBudget(text, profile);
+      return budget
+        ? normalizeProfileFact({
+            ...field,
+            value: {
+              amount: budget.amount,
+              currency: budget.currency,
+              cadence: "per_item",
+            },
+          })
+        : undefined;
+    }
+    default:
+      return undefined;
+  }
+}
+
+async function confirmProfileField({ chat, confirmedProfileField, profilePath, updateProfile }) {
+  const normalized = normalizeProfileFact(confirmedProfileField);
+  if (typeof updateProfile !== "function") {
+    throw new TypeError("updateProfile must be a function.");
+  }
+
+  const patch = createProfilePatch(normalized);
+  const updatedProfile =
+    profilePath === undefined ? await updateProfile(patch) : await updateProfile(patch, profilePath);
+
+  await publishPlainText(chat, DEFAULT_PROFILE_CONFIRMATION_MESSAGE, {
+    field: normalized.field,
+    profileKey: normalized.profileKey,
+    updatedProfile,
+  });
+
+  return {
+    action: "profile_updated",
+    field: normalized.field,
+    profileKey: normalized.profileKey,
+    updatedProfile,
+  };
+}
+
+function createProfileQuestion(profileField) {
+  const field = normalizeProfileField(profileField);
+  const messages = {
+    country: "Which country should I use for shopping availability and delivery?",
+    topSize: "What top size should I remember?",
+    shoeSizeEu: "What is your EU shoe size?",
+    roughBudget: "What rough per-item budget should I use?",
+  };
+
+  return {
+    field: field.field,
+    message: messages[field.field],
+    profileField: field,
+  };
+}
+
+function createProfilePatch(profileFact) {
+  switch (profileFact.field) {
+    case "country":
+      return { country: profileFact.value };
+    case "topSize":
+    case "shoeSizeEu":
+      return {
+        sizes: {
+          [profileFact.garmentClass]: profileFact.value,
+        },
+      };
+    case "roughBudget":
+      return {
+        budgetAnchors: {
+          default: profileFact.value,
+        },
+        perItemPriceCeiling: profileFact.value,
+      };
+    default:
+      throw new TypeError(`Unsupported profile field: ${profileFact.field}`);
+  }
+}
+
+function normalizeProfileFact(profileFact) {
+  if (!profileFact || typeof profileFact !== "object" || Array.isArray(profileFact)) {
+    throw new TypeError("profile field must be an object.");
+  }
+  if (profileFact.profileField) {
+    return normalizeProfileFact(profileFact.profileField);
+  }
+
+  const field = normalizeProfileField(profileFact);
+  if (profileFact.value === undefined) {
+    throw new TypeError("profile field value is required.");
+  }
+
+  return {
+    ...field,
+    value: normalizeProfileValue(field, profileFact.value),
+  };
+}
+
+function normalizeProfileField(profileField) {
+  if (!profileField || typeof profileField !== "object" || Array.isArray(profileField)) {
+    throw new TypeError("profile field must be an object.");
+  }
+  if (profileField.profileField) {
+    return normalizeProfileField(profileField.profileField);
+  }
+
+  switch (profileField.field) {
+    case "country":
+      return {
+        field: "country",
+        label: "country",
+        profileKey: "country",
+      };
+    case "topSize":
+      return {
+        field: "topSize",
+        garmentClass: "tops",
+        label: "top size",
+        profileKey: "sizes.tops",
+      };
+    case "shoeSizeEu":
+      return {
+        field: "shoeSizeEu",
+        garmentClass: "shoes",
+        label: "EU shoe size",
+        profileKey: "sizes.shoes",
+      };
+    case "roughBudget":
+      return {
+        field: "roughBudget",
+        label: "rough budget",
+        profileKey: "budgetAnchors.default",
+      };
+    default:
+      throw new TypeError(`Unsupported profile field: ${profileField.field}`);
+  }
+}
+
+function normalizeProfileValue(profileField, value) {
+  switch (profileField.field) {
+    case "country": {
+      const normalized = normalizeCountryCode(value);
+      if (!normalized) {
+        throw new TypeError("country value must be a 2-letter country code.");
+      }
+      return normalized;
+    }
+    case "topSize":
+    case "shoeSizeEu":
+      return normalizeProfileSizeValue(value, profileField.field);
+    case "roughBudget":
+      return normalizeProfileBudgetValue(value);
+    default:
+      throw new TypeError(`Unsupported profile field: ${profileField.field}`);
+  }
+}
+
+function normalizeProfileSizeValue(value, field) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || !value.value) {
+    throw new TypeError(`${field} value must be a size object.`);
+  }
+
+  const normalized = { value: String(value.value).trim().toUpperCase() };
+  if (!normalized.value) {
+    throw new TypeError(`${field} value must be non-empty.`);
+  }
+  if (value.system) {
+    normalized.system = String(value.system).trim();
+  }
+  return normalized;
+}
+
+function normalizeProfileBudgetValue(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("roughBudget value must be a money object.");
+  }
+  const amount = Number(value.amount);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new TypeError("roughBudget amount must be a positive finite number.");
+  }
+  return {
+    amount,
+    currency: normalizeCurrency(value.currency) ?? "EUR",
+    cadence: value.cadence ?? "per_item",
+  };
+}
+
+function extractCountryCode(message) {
+  const text = normalizeMessage(message);
+  const labeled = text.match(/\b(?:country|ship(?:ping)?\s*to|deliver(?:y)?\s*to)\s*[:#-]?\s*([a-z]{2})\b/i);
+  return normalizeCountryCode(labeled?.[1]) ?? normalizeCountryCode(text);
+}
+
+function extractLooseSize(message) {
+  const text = normalizeMessage(message);
+  const match = text.match(/\b(?:xxs|xs|s|m|l|xl|xxl|xxxl|[0-9]{1,3}(?:\.[0-9])?)\b/i);
+  return match ? { value: match[0].toUpperCase() } : undefined;
+}
+
+function extractLooseShoeSize(message) {
+  const text = normalizeMessage(message);
+  const match = text.match(/\b([0-9]{2}(?:\.[0-9])?)\b/);
+  return match ? { system: "EU", value: match[1] } : undefined;
+}
+
+function extractLooseBudget(message, profile) {
+  const text = normalizeMessage(message);
+  const currency = normalizeCurrency(profile?.currency) ?? "EUR";
+  const match = text.match(/\b([0-9]+(?:[.,][0-9]{1,2})?)\b/);
+  if (!match) {
+    return undefined;
+  }
+
+  const amount = Number.parseFloat(match[1].replace(",", "."));
+  return Number.isFinite(amount) && amount > 0 ? { amount, currency } : undefined;
+}
+
 function resolveProfileSize(profile, garmentClass) {
   const size = profile?.sizes?.[garmentClass];
   if (!size?.value) {
@@ -329,6 +680,21 @@ async function askClarification(chat, result) {
   };
 }
 
+async function publishConfirmationCard(chat, confirmationCard, profileFact) {
+  if (!chat) {
+    return;
+  }
+  const payload = {
+    confirmationCard,
+    pendingProfileField: profileFact,
+  };
+  if (typeof chat.showConfirmationCard === "function") {
+    await chat.showConfirmationCard(confirmationCard, payload);
+    return;
+  }
+  await publishPlainText(chat, confirmationCard.body, payload);
+}
+
 async function publishPlainText(chat, message, payload) {
   if (!chat) {
     return;
@@ -368,6 +734,28 @@ function normalizeCurrency(value) {
   }
   const normalized = value.trim().toUpperCase();
   return /^[A-Z]{3}$/.test(normalized) ? normalized : undefined;
+}
+
+function normalizeCountryCode(value) {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const normalized = value.trim().toUpperCase();
+  return /^[A-Z]{2}$/.test(normalized) ? normalized : undefined;
+}
+
+function formatProfileFactValue(profileFact) {
+  switch (profileFact.field) {
+    case "country":
+      return profileFact.value;
+    case "topSize":
+    case "shoeSizeEu":
+      return [profileFact.value.system, profileFact.value.value].filter(Boolean).join(" ");
+    case "roughBudget":
+      return `${profileFact.value.currency} ${profileFact.value.amount}`;
+    default:
+      return String(profileFact.value);
+  }
 }
 
 function currencyFromToken(token) {
