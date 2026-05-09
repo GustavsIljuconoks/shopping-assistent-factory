@@ -15,9 +15,20 @@ export const SHOPPING_SETUP_PLACEHOLDER =
   "Shopping preferences are in setup. Profile controls will appear here in a later milestone.";
 export const SHOPPING_ACTIVITY_EMPTY_STATE =
   "No shopping activity has been recorded yet.";
+export const CONNECTED_RETAILERS_EMPTY_STATE =
+  "No retailers are connected yet.";
 
-export function renderSettingsShoppingPane({ profile } = {}) {
+export function renderSettingsShoppingPane({ connectedRetailers = [], profile } = {}) {
   const profileState = profile ? "Profile data loaded." : "No shopping profile data yet.";
+  const retailers = normalizeConnectedRetailers(connectedRetailers);
+  const connectedRetailersContent =
+    retailers.length === 0
+      ? `<p class="settings-empty-state">${escapeHtml(CONNECTED_RETAILERS_EMPTY_STATE)}</p>`
+      : [
+          '<ul class="connected-retailers-list">',
+          ...retailers.map((retailer) => renderConnectedRetailer(retailer)),
+          "</ul>",
+        ].join("\n    ");
 
   return [
     '<section id="shopping" class="settings-pane" aria-labelledby="shopping-heading">',
@@ -25,6 +36,10 @@ export function renderSettingsShoppingPane({ profile } = {}) {
     '  <h1 id="shopping-heading">Shopping</h1>',
     `  <p class="settings-placeholder">${escapeHtml(SHOPPING_SETUP_PLACEHOLDER)}</p>`,
     `  <p class="settings-status">${escapeHtml(profileState)}</p>`,
+    '  <section class="settings-subpane" aria-labelledby="connected-retailers-heading">',
+    '    <h2 id="connected-retailers-heading">Connected retailers</h2>',
+    "    " + connectedRetailersContent,
+    "  </section>",
     "</section>",
   ].join("\n");
 }
@@ -48,7 +63,12 @@ export function renderSettingsPrivacyPane({ auditEntries = [] } = {}) {
   ].join("\n");
 }
 
-export function renderSettingsApp({ activeSection = "privacy", auditEntries, profile } = {}) {
+export function renderSettingsApp({
+  activeSection = "privacy",
+  auditEntries,
+  connectedRetailers,
+  profile,
+} = {}) {
   const active = SETTINGS_SECTIONS.some((section) => section.id === activeSection)
     ? activeSection
     : "privacy";
@@ -63,7 +83,7 @@ export function renderSettingsApp({ activeSection = "privacy", auditEntries, pro
     "  </aside>",
     `  ${
       active === "shopping"
-        ? renderSettingsShoppingPane({ profile }).replaceAll("\n", "\n  ")
+        ? renderSettingsShoppingPane({ connectedRetailers, profile }).replaceAll("\n", "\n  ")
         : renderSettingsPrivacyPane({ auditEntries }).replaceAll("\n", "\n  ")
     }`,
     "</main>",
@@ -73,6 +93,39 @@ export function renderSettingsApp({ activeSection = "privacy", auditEntries, pro
 function renderSettingsNavLink(section, activeSection) {
   const current = section.id === activeSection ? ' aria-current="page"' : "";
   return `      <a href="${section.href}"${current}>${escapeHtml(section.label)}</a>`;
+}
+
+function renderConnectedRetailer(retailer) {
+  return [
+    '<li class="connected-retailer">',
+    `  <span class="connected-retailer-name">${escapeHtml(retailer.label)}</span>`,
+    `  <span class="connected-retailer-status">${escapeHtml(retailer.statusLabel)}</span>`,
+    "</li>",
+  ].join("\n      ");
+}
+
+function normalizeConnectedRetailers(connectedRetailers) {
+  if (!Array.isArray(connectedRetailers)) {
+    throw new TypeError("connectedRetailers must be an array.");
+  }
+
+  return connectedRetailers.map((retailer) => {
+    if (!retailer || typeof retailer !== "object" || Array.isArray(retailer)) {
+      throw new TypeError("connectedRetailers entries must be objects.");
+    }
+
+    return {
+      label: normalizeString(retailer.label ?? retailer.retailerIdentifier, "retailer label"),
+      statusLabel: normalizeString(retailer.statusLabel ?? retailer.status, "retailer status"),
+    };
+  });
+}
+
+function normalizeString(value, field) {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new TypeError(`${field} must be a non-empty string.`);
+  }
+  return value.trim();
 }
 
 function escapeHtml(value) {

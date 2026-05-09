@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  CONNECTED_RETAILERS_EMPTY_STATE,
   SHOPPING_ACTIVITY_EMPTY_STATE,
   SHOPPING_SETUP_PLACEHOLDER,
   renderSettingsApp,
@@ -37,6 +38,8 @@ test("can still render the Settings Shopping section", () => {
   assert.match(html, /aria-current="page">Shopping<\/a>/);
   assert.match(html, /<section id="shopping"/);
   assert.match(html, new RegExp(SHOPPING_SETUP_PLACEHOLDER));
+  assert.match(html, /Connected retailers/);
+  assert.match(html, new RegExp(CONNECTED_RETAILERS_EMPTY_STATE));
 });
 
 test("renders the Shopping pane without profile data", () => {
@@ -58,4 +61,19 @@ test("accepts present profile data without changing the empty setup shell", () =
 
   assert.match(html, /Profile data loaded\./);
   assert.match(html, new RegExp(SHOPPING_SETUP_PLACEHOLDER));
+});
+
+test("renders connected retailer status in the Shopping pane", () => {
+  const html = renderSettingsShoppingPane({
+    connectedRetailers: [
+      {
+        retailerIdentifier: "Asket",
+        status: "Connected",
+      },
+    ],
+  });
+
+  assert.match(html, /Connected retailers/);
+  assert.match(html, /<span class="connected-retailer-name">Asket<\/span>/);
+  assert.match(html, /<span class="connected-retailer-status">Connected<\/span>/);
 });
