@@ -1,9 +1,11 @@
 import { updateShoppingProfile } from "./shopping-profile.mjs";
+import { ASOS_RETAILER, stageAsosCartItem } from "./asos-cart-staging-recipe.mjs";
 import { ASKET_RETAILER, stageAsketCartItem } from "./asket-cart-staging-recipe.mjs";
 
 export const SHOPPING_CHAT_LOW_CONFIDENCE_MESSAGE =
   "I found shopping intent, but I am not confident enough to make a proposal yet.";
 export const ASKET_CART_URL = "https://www.asket.com/cart";
+export const ASOS_CART_URL = "https://www.asos.com/basket/";
 
 const DEFAULT_MIN_PROPOSAL_CONFIDENCE = 0.7;
 const DEFAULT_PROFILE_CONFIRMATION_MESSAGE = "Got it. I saved that to your shopping profile.";
@@ -316,6 +318,81 @@ export function renderAsketStagingResultCard({
     stagedCount: normalizeNonNegativeInteger(stagedCount, "stagedCount"),
     totalSelected: normalizeNonNegativeInteger(totalSelected, "totalSelected"),
     type: "asket_staging_result_card",
+  };
+}
+
+export function renderAsosStagingResultCard({
+  stagedCount,
+  totalSelected,
+  cartUrl = ASOS_CART_URL,
+} = {}) {
+  return {
+    openCartLink: {
+      href: normalizeUrl(cartUrl, "cartUrl"),
+      label: "Open cart on ASOS",
+    },
+    retailer: ASOS_RETAILER,
+    stagedCount: normalizeNonNegativeInteger(stagedCount, "stagedCount"),
+    totalSelected: normalizeNonNegativeInteger(totalSelected, "totalSelected"),
+    type: "asos_staging_result_card",
+  };
+}
+
+export async function stageSelectedAsosCandidates({
+  selectedCandidates,
+  page,
+  auditLogPath,
+  stageCartItem = stageAsosCartItem,
+  refreshActiveCarts,
+  renderResultCard = renderAsosStagingResultCard,
+  cartUrl = ASOS_CART_URL,
+} = {}) {
+  const candidates = normalizeSelectedCandidates(selectedCandidates);
+
+  if (typeof stageCartItem !== "function") {
+    throw new TypeError("stageCartItem must be a function.");
+  }
+
+  const results = [];
+  let stagedCount = 0;
+  let activeCarts;
+
+  for (const candidate of candidates) {
+    const result = await stageCartItem({
+      auditLogPath,
+      page,
+      productId: candidate.productId,
+      productUrl: candidate.productUrl,
+      size: candidate.size,
+    });
+    results.push({ candidate, result });
+
+    if (result?.status === "success") {
+      stagedCount += 1;
+      if (typeof refreshActiveCarts === "function") {
+        activeCarts = await refreshActiveCarts({
+          cartUrl,
+          lastResult: result,
+          retailer: ASOS_RETAILER,
+          stagedCount,
+        });
+      }
+    }
+  }
+
+  return {
+    action: "asos_staging_result",
+    activeCarts,
+    cartUrl,
+    resultCard: await renderResultCard({
+      cartUrl,
+      results,
+      stagedCount,
+      totalSelected: candidates.length,
+    }),
+    results,
+    stagedCount,
+    totalSelected: candidates.length,
   };
 }
 

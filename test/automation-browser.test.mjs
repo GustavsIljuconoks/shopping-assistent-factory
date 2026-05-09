@@ -5,6 +5,7 @@ import {
   AUTOMATION_BROWSER_WAITING_MESSAGE,
   VisibleAutomationBrowserRun,
   createAutomationBrowserTitle,
+  notifyIfBrowserChallengeVisible,
 } from "../src/automation-browser.mjs";
 
 test("creates the distinct Bestfriend browser title for a retailer", () => {
@@ -93,6 +94,49 @@ test("keeps the browser foregrounded and publishes Waiting when a challenge is e
     ["chat", AUTOMATION_BROWSER_WAITING_MESSAGE, "captcha", "Zalando"],
   ]);
   assert.equal(browserRun.isActive, true);
+});
+
+test("publishes Waiting when a Cloudflare-style challenge page is detected", async () => {
+  const events = [];
+  const session = {
+    async setWindowTitle(title) {
+      events.push(["title", title]);
+    },
+    async foreground() {
+      events.push(["foreground"]);
+    },
+  };
+  const launcher = {
+    async launch() {
+      return session;
+    },
+  };
+  const browserRun = new VisibleAutomationBrowserRun({
+    launcher,
+    chat: {
+      async showWaiting(message, payload) {
+        events.push(["chat", message, payload.reason, payload.retailer]);
+      },
+    },
+  });
+
+  await browserRun.startStagingRun({ retailer: "ASOS" });
+  const notified = await notifyIfBrowserChallengeVisible({
+    browserRun,
+    session: {
+      async evaluate() {
+        return true;
+      },
+    },
+    reason: "cloudflare",
+  });
+
+  assert.equal(notified, true);
+  assert.deepEqual(events, [
+    ["title", "Bestfriend · ASOS"],
+    ["foreground"],
+    ["chat", AUTOMATION_BROWSER_WAITING_MESSAGE, "cloudflare", "ASOS"],
+  ]);
 });
 
 test("headless runs suppress foregrounding and backgrounding", async () => {

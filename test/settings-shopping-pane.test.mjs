@@ -56,7 +56,6 @@ test("can still render the Settings Shopping section", () => {
   assert.match(html, new RegExp(CONNECTED_RETAILERS_EMPTY_STATE));
 });
 
-test("renders the Shopping pane with editable default profile data", () => {
 test("renders Settings Memories with a Shopping filter and per-memory controls", () => {
   const html = renderSettingsApp({
     activeSection: "memories",

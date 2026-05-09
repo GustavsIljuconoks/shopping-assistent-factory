@@ -390,6 +390,8 @@ function renderRetailerToggle(retailer, enabled) {
     "          </label>",
     "        </li>",
   ].join("\n");
+}
+
 function renderActiveSettingsPane({
   active,
   auditEntries,
