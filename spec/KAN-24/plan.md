@@ -16,10 +16,16 @@
 - [x] Add focused unit tests for success, out-of-stock, disabled-add out-of-stock, login-expired, and missing-control error handling.
 - [x] Run validation.
 - [x] Write Jira-facing response.
+- [x] Continuation check: confirmed the implementation is already merged on `main` via PR #10 and no additional code changes are required.
 
 ## Validation
 
 - `node --check src/asket-cart-staging-recipe.mjs`
 - `node --check test/asket-cart-staging-recipe.test.mjs`
+- `node --test`
+- `git diff --check`
+
+## Continuation Validation
+
 - `node --test`
 - `git diff --check`
