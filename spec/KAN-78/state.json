@@ -1,11 +1,11 @@
 {
   "ticket_id": "KAN-78",
-  "run_count": 3,
+  "run_count": 4,
   "kind": "pr",
   "branch": "tdf/kan-78",
   "last_session_id": "",
   "prev_session_id": null,
-  "last_run_at": "2026-05-09T16:45:23.452Z",
-  "last_conclusion": "unknown",
+  "last_run_at": "2026-05-09T17:18:09.134Z",
+  "last_conclusion": "failure",
   "last_kind": "pr"
 }

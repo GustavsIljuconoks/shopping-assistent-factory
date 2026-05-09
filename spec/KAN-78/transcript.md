@@ -29,3 +29,14 @@
 - run_dir: spec/KAN-78/runs/20260509T164522Z-25606352062
 - assistant_summary:
   <empty>
+
+## Run 2026-05-09T17:18:09.134Z
+- agent_backend: codex
+- run_kind: continuation
+- prev_session_id: <none>
+- new_session_id: <none>
+- session_id_rotated: false
+- conclusion: failure
+- run_dir: spec/KAN-78/runs/20260509T171800Z-25607034688
+- assistant_summary:
+  <empty>
