@@ -1,6 +1,6 @@
 # KAN-78: Feed items for shopping events
 
-Generated from Jira on 2026-05-09T16:21:42.530Z.
+Generated from Jira on 2026-05-09T16:43:47.077Z.
 
 ## Issue Details
 
@@ -9,14 +9,14 @@ Generated from Jira on 2026-05-09T16:21:42.530Z.
 | Key | KAN-78 |
 | Title | Feed items for shopping events |
 | Type | Task |
-| Status | To Do |
+| Status | In Progress |
 | Priority | Medium |
 | Assignee | - |
 | Reporter | GustavsIljuconoks |
 | Labels | dark-factory-generated, dfp-35b8809f9322 |
 | Components | - |
 | Created | 2026-05-09T16:13:19.548+0300 |
-| Updated | 2026-05-09T16:13:19.735+0300 |
+| Updated | 2026-05-09T19:21:46.346+0300 |
 
 ## Description
 
@@ -42,6 +42,12 @@ Suggested priority: medium
 
 Estimated complexity: small
 
-## Comments (0)
+## Comments (1)
 
-_No comments._
+### GustavsIljuconoks on 2026-05-09T19:21:46.346+0300
+
+[TDF-bot] Codex processed KAN-78 (conclusion: unknown).
+
+Branch: [https://github.com/GustavsIljuconoks/shopping-assistent-factory/tree/tdf%2Fkan-78](https://github.com/GustavsIljuconoks/shopping-assistent-factory/tree/tdf%2Fkan-78)
+
+Pull request: [https://github.com/GustavsIljuconoks/shopping-assistent-factory/pull/30](https://github.com/GustavsIljuconoks/shopping-assistent-factory/pull/30)
