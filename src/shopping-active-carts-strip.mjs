@@ -6,6 +6,7 @@ export const RETAILER_CART_URLS = Object.freeze({
   Asket: "https://www.asket.com/en-dk/cart",
   ASOS: "https://www.asos.com/basket/",
   "About You": "https://www.aboutyou.lv/basket",
+  "H&M.lv": "https://www2.hm.com/lv_lv/cart",
   "Zalando.lv": "https://www.zalando.lv/cart/",
 });
 

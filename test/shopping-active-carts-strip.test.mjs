@@ -123,6 +123,21 @@ test("uses the default ASOS basket URL when recording staged items", () => {
   });
 });
 
+test("uses the default H&M.lv cart URL when recording staged items", () => {
+  const activeCarts = new Map();
+  const row = recordStagedCartItem(activeCarts, {
+    retailer: "H&M.lv",
+    stagedAt: "2026-05-09T13:12:00.000Z",
+  });
+
+  assert.deepEqual(row, {
+    cartUrl: "https://www2.hm.com/lv_lv/cart",
+    itemCount: 1,
+    lastStagedAt: "2026-05-09T13:12:00.000Z",
+    retailer: "H&M.lv",
+  });
+});
+
 test("publishes and clears the chat strip as active carts appear and disappear", async () => {
   const events = [];
   const chat = {
