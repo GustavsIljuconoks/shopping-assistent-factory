@@ -4,9 +4,11 @@ import assert from "node:assert/strict";
 import {
   CONNECTED_RETAILERS_EMPTY_STATE,
   SHOPPING_ACTIVITY_EMPTY_STATE,
+  SHOPPING_MEMORY_FILTER_LABEL,
   SHOPPING_SETUP_PLACEHOLDER,
   renderRetailerProposalCard,
   renderSettingsApp,
+  renderSettingsMemoriesPane,
   renderSettingsPrivacyPane,
   renderSettingsShoppingPane,
 } from "../src/settings-shopping-pane.mjs";
@@ -41,6 +43,50 @@ test("can still render the Settings Shopping section", () => {
   assert.match(html, new RegExp(SHOPPING_SETUP_PLACEHOLDER));
   assert.match(html, /Connected retailers/);
   assert.match(html, new RegExp(CONNECTED_RETAILERS_EMPTY_STATE));
+});
+
+test("renders Settings Memories with a Shopping filter and per-memory controls", () => {
+  const html = renderSettingsApp({
+    activeSection: "memories",
+    memories: [
+      createMemory({
+        id: "shopping-1",
+        content: "Avoid scratchy Oxford collars.",
+        pinned: true,
+        sentiment: "negative",
+        tags: ["Shopping"],
+        subject: {
+          brand: "Asket",
+          title: "The Oxford Shirt",
+          color: "White",
+          size: "M",
+        },
+      }),
+      createMemory({
+        id: "general-1",
+        content: "General reminder",
+        tags: ["General"],
+      }),
+    ],
+  });
+
+  assert.match(html, /aria-current="page">Memories<\/a>/);
+  assert.match(html, new RegExp(SHOPPING_MEMORY_FILTER_LABEL));
+  assert.match(html, /aria-label="Shopping memories"/);
+  assert.match(html, /overflow-y: auto/);
+  assert.match(html, /Avoid scratchy Oxford collars\./);
+  assert.match(html, /Asket \/ The Oxford Shirt \/ White \/ M/);
+  assert.match(html, /memory-pin-button" aria-pressed="true">Unpin/);
+  assert.match(html, /memory-edit-button">Edit/);
+  assert.match(html, /memory-wipe-button">Wipe/);
+  assert.match(html, /Clear shopping memories/);
+  assert.doesNotMatch(html, /General reminder/);
+});
+
+test("renders an empty Shopping memory filter state", () => {
+  const html = renderSettingsMemoriesPane({ memories: [] });
+
+  assert.match(html, /No Shopping memories yet\./);
 });
 
 test("renders the Shopping pane without profile data", () => {
@@ -177,6 +223,18 @@ function createCandidate(overrides = {}) {
     price: "EUR 120",
     reasoning: "Best match for the requested fit and color.",
     productUrl: "https://asket.example/products/oxford-shirt",
+    ...overrides,
+  };
+}
+
+function createMemory(overrides = {}) {
+  return {
+    id: "memory-1",
+    content: "Liked this result.",
+    pinned: false,
+    sentiment: "positive",
+    tags: ["Shopping"],
+    timestamp: "2026-05-09T12:00:00.000Z",
     ...overrides,
   };
 }

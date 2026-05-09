@@ -12,7 +12,8 @@
     "budgetAnchors",
     "hardExclusions",
     "perItemPriceCeiling",
-    "enabledRetailers"
+    "enabledRetailers",
+    "memories"
   ],
   "properties": {
     "schemaVersion": {
@@ -112,6 +113,74 @@
         "minLength": 1
       },
       "uniqueItems": true
+    },
+    "memories": {
+      "description": "Soft memories captured from shopping outcomes and feedback.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "content", "pinned", "sentiment", "tags", "timestamp", "type"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1
+          },
+          "pinned": {
+            "type": "boolean"
+          },
+          "sentiment": {
+            "type": "string",
+            "enum": ["positive", "negative", "neutral"]
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "type": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source": {
+            "type": "string",
+            "minLength": 1
+          },
+          "outcome": {
+            "type": "string",
+            "minLength": 1
+          },
+          "subject": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "brand": { "type": "string", "minLength": 1 },
+              "title": { "type": "string", "minLength": 1 },
+              "color": { "type": "string", "minLength": 1 },
+              "size": { "type": "string", "minLength": 1 },
+              "productUrl": { "type": "string", "minLength": 1 },
+              "retailer": { "type": "string", "minLength": 1 },
+              "category": { "type": "string", "minLength": 1 },
+              "tags": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 },
+                "uniqueItems": true
+              }
+            }
+          }
+        }
+      }
     }
   }
 }
