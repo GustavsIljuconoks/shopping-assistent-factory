@@ -417,7 +417,7 @@ function renderSettingsNavLink(section, activeSection) {
 
 function renderConnectedRetailer(retailer) {
   return [
-    '<li class="connected-retailer">',
+    `<li class="connected-retailer${retailer.discoveryOnly ? " connected-retailer--discovery-only" : ""}">`,
     `  <span class="connected-retailer-name">${escapeHtml(retailer.label)}</span>`,
     `  <span class="connected-retailer-status">${escapeHtml(retailer.statusLabel)}</span>`,
     "</li>",
@@ -461,15 +461,16 @@ export function renderRetailerProposalCard(proposal) {
 function renderNormalizedRetailerProposalCard(proposal) {
   const selectedCount = countSelectedCandidates(proposal.candidates);
   const isStaged = proposal.staged;
+  const isDiscoveryOnly = proposal.discoveryOnly && !isStaged;
   const buttonDisabled = selectedCount === 0 || isStaged ? " disabled" : "";
   const selectedLabel = `${selectedCount} selected`;
 
   return [
-    `    <article class="proposal-card${isStaged ? " proposal-card--staged" : ""}" aria-label="${escapeHtml(proposal.retailer)} proposal">`,
+    `    <article class="proposal-card${isStaged ? " proposal-card--staged" : ""}${isDiscoveryOnly ? " proposal-card--discovery-only" : ""}" aria-label="${escapeHtml(proposal.retailer)} proposal">`,
     '      <header class="proposal-card-header">',
     "        <div>",
     `          <h3>${escapeHtml(proposal.retailer)}</h3>`,
-    `          <p>${escapeHtml(selectedLabel)}</p>`,
+    `          <p>${escapeHtml(isDiscoveryOnly ? `${selectedLabel} / discovery-only` : selectedLabel)}</p>`,
     "        </div>",
     isStaged
       ? `        <a class="proposal-cart-link" href="${escapeHtml(proposal.cartUrl)}" target="_blank" rel="noreferrer">Open cart</a>`
@@ -481,7 +482,9 @@ function renderNormalizedRetailerProposalCard(proposal) {
     '      <footer class="proposal-card-footer">',
     `        <span>ETA: ${escapeHtml(proposal.eta)}</span>`,
     `        <span>Returns: ${escapeHtml(proposal.returnPolicy)}</span>`,
-    `        <button type="button" class="proposal-stage-button"${buttonDisabled}>Stage selected to ${escapeHtml(proposal.retailer)} cart</button>`,
+    isDiscoveryOnly
+      ? `        <a class="proposal-manual-link" href="${escapeHtml(proposal.manualUrl)}" target="_blank" rel="noreferrer">Open in ${escapeHtml(proposal.retailer)} to add manually</a>`
+      : `        <button type="button" class="proposal-stage-button"${buttonDisabled}>Stage selected to ${escapeHtml(proposal.retailer)} cart</button>`,
     "      </footer>",
     "    </article>",
   ].filter(Boolean).join("\n");
@@ -543,7 +546,10 @@ function normalizeConnectedRetailers(connectedRetailers) {
 
     return {
       label: normalizeString(retailer.label ?? retailer.retailerIdentifier, "retailer label"),
-      statusLabel: normalizeString(retailer.statusLabel ?? retailer.status, "retailer status"),
+      discoveryOnly: Boolean(retailer.discoveryOnly),
+      statusLabel: Boolean(retailer.discoveryOnly)
+        ? "Discovery-only"
+        : normalizeString(retailer.statusLabel ?? retailer.status, "retailer status"),
     };
   });
 }
@@ -620,6 +626,14 @@ function normalizeProposalCard(proposal) {
     returnPolicy: normalizeString(proposal.returnPolicy, "proposal return policy"),
     cartUrl: normalizeString(proposal.cartUrl, "proposal cart URL"),
     candidates: candidatesWithSelection,
+    discoveryOnly: Boolean(proposal.discoveryOnly ?? proposal.retailerStatus?.discoveryOnly),
+    manualUrl: normalizeString(
+      proposal.manualUrl ??
+        candidatesWithSelection.find((candidate) => candidate.selected)?.productUrl ??
+        candidatesWithSelection[0]?.productUrl ??
+        proposal.cartUrl,
+      "proposal manual URL",
+    ),
     staged: normalizeStagedState(proposal),
     stagedCount:
       proposal.stagedCount === undefined ? undefined : normalizeNonNegativeInteger(proposal.stagedCount, "staged count"),

@@ -14,6 +14,11 @@ import {
   stageSelectedAsketCandidates,
   stageSelectedAsosCandidates,
 } from "../src/shopping-chat-flow.mjs";
+import {
+  createRetailerCircuitBreakerState,
+  getRetailerCircuitBreakerStatus,
+  recordRetailerStagingFailure,
+} from "../src/retailer-circuit-breaker.mjs";
 
 test("detects shopping intent in a garment request", () => {
   assert.deepEqual(detectShoppingIntent("Find me black jeans under 100 euros"), {
@@ -379,6 +384,87 @@ test("does not refresh active carts for unsuccessful staging results", async () 
     updates.map((update) => update.stagedCount),
     [1],
   );
+});
+
+test("records Asket staging failures and emits a feed item when discovery-only starts", async () => {
+  const feedItems = [];
+  const dates = [
+    new Date("2026-05-09T10:00:00.000Z"),
+    new Date("2026-05-09T11:00:00.000Z"),
+    new Date("2026-05-09T12:00:00.000Z"),
+  ];
+
+  const result = await stageSelectedAsketCandidates({
+    circuitBreakerState: createRetailerCircuitBreakerState(),
+    emitFeedItem(item) {
+      feedItems.push(item);
+    },
+    now() {
+      return dates.shift();
+    },
+    selectedCandidates: [
+      {
+        productUrl: "https://www.asket.com/products/the-t-shirt",
+        size: "M",
+      },
+      {
+        productUrl: "https://www.asket.com/products/the-shirt",
+        size: "M",
+      },
+      {
+        productUrl: "https://www.asket.com/products/the-overshirt",
+        size: "M",
+      },
+    ],
+    async stageCartItem({ productUrl }) {
+      return {
+        productUrl,
+        retailer: "Asket",
+        status: "error",
+      };
+    },
+  });
+
+  const status = getRetailerCircuitBreakerStatus(result.circuitBreakerState, "Asket", {
+    now: new Date("2026-05-09T12:30:00.000Z"),
+  });
+
+  assert.equal(status.discoveryOnly, true);
+  assert.equal(status.failureCount, 3);
+  assert.equal(result.feedItems.length, 1);
+  assert.equal(feedItems.length, 1);
+  assert.equal(feedItems[0].type, "shopping_retailer_discovery_only");
+});
+
+test("resets ASOS circuit breaker state after a successful staging recipe test", async () => {
+  let circuitBreakerState = createRetailerCircuitBreakerState();
+  circuitBreakerState = recordRetailerStagingFailure(circuitBreakerState, "ASOS", {
+    now: new Date("2026-05-09T10:00:00.000Z"),
+  }).state;
+
+  const result = await stageSelectedAsosCandidates({
+    circuitBreakerState,
+    now() {
+      return new Date("2026-05-09T11:00:00.000Z");
+    },
+    selectedCandidates: [
+      {
+        productUrl: "https://www.asos.com/asos-design/product/prd/123",
+        size: "M",
+      },
+    ],
+    async stageCartItem({ productUrl }) {
+      return {
+        productUrl,
+        retailer: "ASOS",
+        status: "success",
+      };
+    },
+  });
+
+  assert.equal(getRetailerCircuitBreakerStatus(result.circuitBreakerState, "ASOS", {
+    now: new Date("2026-05-09T11:30:00.000Z"),
+  }).failureCount, 0);
 });
 
 test("returns an Asket result card for zero selected candidates without staging", async () => {

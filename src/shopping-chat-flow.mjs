@@ -1,6 +1,10 @@
 import { updateShoppingProfile } from "./shopping-profile.mjs";
 import { ASOS_RETAILER, stageAsosCartItem } from "./asos-cart-staging-recipe.mjs";
 import { ASKET_RETAILER, stageAsketCartItem } from "./asket-cart-staging-recipe.mjs";
+import {
+  recordRetailerManualStagingSuccess,
+  recordRetailerStagingFailure,
+} from "./retailer-circuit-breaker.mjs";
 
 export const SHOPPING_CHAT_LOW_CONFIDENCE_MESSAGE =
   "I found shopping intent, but I am not confident enough to make a proposal yet.";
@@ -254,6 +258,11 @@ export async function stageSelectedAsketCandidates({
   refreshActiveCarts,
   renderResultCard = renderAsketStagingResultCard,
   cartUrl = ASKET_CART_URL,
+  circuitBreakerState,
+  recordStagingFailure = recordRetailerStagingFailure,
+  recordManualStagingSuccess = recordRetailerManualStagingSuccess,
+  emitFeedItem,
+  now = () => new Date(),
 } = {}) {
   const candidates = normalizeSelectedCandidates(selectedCandidates);
 
@@ -262,8 +271,10 @@ export async function stageSelectedAsketCandidates({
   }
 
   const results = [];
+  const feedItems = [];
   let stagedCount = 0;
   let activeCarts;
+  let nextCircuitBreakerState = circuitBreakerState;
 
   for (const candidate of candidates) {
     const result = await stageCartItem({
@@ -277,6 +288,14 @@ export async function stageSelectedAsketCandidates({
 
     if (result?.status === "success") {
       stagedCount += 1;
+      if (nextCircuitBreakerState && typeof recordManualStagingSuccess === "function") {
+        const circuitBreakerResult = recordManualStagingSuccess(
+          nextCircuitBreakerState,
+          ASKET_RETAILER,
+          { now: now() },
+        );
+        nextCircuitBreakerState = circuitBreakerResult.state;
+      }
       if (typeof refreshActiveCarts === "function") {
         activeCarts = await refreshActiveCarts({
           cartUrl,
@@ -285,6 +304,19 @@ export async function stageSelectedAsketCandidates({
           stagedCount,
         });
       }
+    } else if (nextCircuitBreakerState && typeof recordStagingFailure === "function") {
+      const circuitBreakerResult = recordStagingFailure(
+        nextCircuitBreakerState,
+        ASKET_RETAILER,
+        {
+          emitFeedItem,
+          now: now(),
+        },
+      );
+      nextCircuitBreakerState = circuitBreakerResult.state;
+      if (circuitBreakerResult.feedItem) {
+        feedItems.push(circuitBreakerResult.feedItem);
+      }
     }
   }
 
@@ -292,6 +324,8 @@ export async function stageSelectedAsketCandidates({
     action: "asket_staging_result",
     activeCarts,
     cartUrl,
+    circuitBreakerState: nextCircuitBreakerState,
+    feedItems,
     resultCard: await renderResultCard({
       cartUrl,
       results,
@@ -346,6 +380,11 @@ export async function stageSelectedAsosCandidates({
   refreshActiveCarts,
   renderResultCard = renderAsosStagingResultCard,
   cartUrl = ASOS_CART_URL,
+  circuitBreakerState,
+  recordStagingFailure = recordRetailerStagingFailure,
+  recordManualStagingSuccess = recordRetailerManualStagingSuccess,
+  emitFeedItem,
+  now = () => new Date(),
 } = {}) {
   const candidates = normalizeSelectedCandidates(selectedCandidates);
 
@@ -354,8 +393,10 @@ export async function stageSelectedAsosCandidates({
   }
 
   const results = [];
+  const feedItems = [];
   let stagedCount = 0;
   let activeCarts;
+  let nextCircuitBreakerState = circuitBreakerState;
 
   for (const candidate of candidates) {
     const result = await stageCartItem({
@@ -369,6 +410,14 @@ export async function stageSelectedAsosCandidates({
 
     if (result?.status === "success") {
       stagedCount += 1;
+      if (nextCircuitBreakerState && typeof recordManualStagingSuccess === "function") {
+        const circuitBreakerResult = recordManualStagingSuccess(
+          nextCircuitBreakerState,
+          ASOS_RETAILER,
+          { now: now() },
+        );
+        nextCircuitBreakerState = circuitBreakerResult.state;
+      }
       if (typeof refreshActiveCarts === "function") {
         activeCarts = await refreshActiveCarts({
           cartUrl,
@@ -377,6 +426,19 @@ export async function stageSelectedAsosCandidates({
           stagedCount,
         });
       }
+    } else if (nextCircuitBreakerState && typeof recordStagingFailure === "function") {
+      const circuitBreakerResult = recordStagingFailure(
+        nextCircuitBreakerState,
+        ASOS_RETAILER,
+        {
+          emitFeedItem,
+          now: now(),
+        },
+      );
+      nextCircuitBreakerState = circuitBreakerResult.state;
+      if (circuitBreakerResult.feedItem) {
+        feedItems.push(circuitBreakerResult.feedItem);
+      }
     }
   }
 
@@ -384,6 +446,8 @@ export async function stageSelectedAsosCandidates({
     action: "asos_staging_result",
     activeCarts,
     cartUrl,
+    circuitBreakerState: nextCircuitBreakerState,
+    feedItems,
     resultCard: await renderResultCard({
       cartUrl,
       results,

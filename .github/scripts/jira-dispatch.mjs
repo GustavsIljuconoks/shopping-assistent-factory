@@ -151,6 +151,20 @@ async function appendGithubEnv(values) {
   await writeFile(file, body + "\n", { flag: "a" });
 }
 
+/** Step outputs for workflow `if:` — GITHUB_ENV is not visible in env context there. */
+async function appendGithubOutput(values) {
+  const file = env.GITHUB_OUTPUT;
+  if (!file) return;
+  const body = Object.entries(values)
+    .map(([k, v]) => {
+      const s = String(v ?? "");
+      if (s.includes("\n")) throw new Error(`appendGithubOutput: multiline value for ${k}`);
+      return `${k}=${s}\n`;
+    })
+    .join("");
+  await writeFile(file, body, { flag: "a" });
+}
+
 async function pathExists(p) {
   try {
     await access(p);
@@ -234,6 +248,15 @@ async function prepareDispatch() {
       console.log(`Existing branch ${branchName} found on origin; checking out.`);
       execSync(`git fetch origin ${JSON.stringify(branchName)}`, { stdio: "inherit" });
       execSync(`git checkout -B ${JSON.stringify(branchName)} origin/${branchName}`, { stdio: "inherit" });
+      // Older ticket branches often lack new CI scripts (codex-runner, etc.). Take
+      // .github/scripts from main so the workflow can spawn agents without MODULE_NOT_FOUND.
+      try {
+        execSync("git fetch origin main", { stdio: "inherit" });
+        execSync("git checkout origin/main -- .github/scripts", { stdio: "inherit" });
+        console.log("Synced .github/scripts from origin/main into this branch for CI.");
+      } catch (err) {
+        console.warn(`Could not sync .github/scripts from origin/main: ${err?.message ?? err}`);
+      }
     } else {
       console.log(`No existing branch ${branchName}; will create from main on commit.`);
     }
@@ -302,8 +325,12 @@ async function prepareDispatch() {
     RUN_DIR: runDir,
     PROMPT_FILE: promptFile,
   });
+  await appendGithubOutput({ should_run: "true", kind });
 
-  console.log(`Prepared dispatch for ${key} (kind=${kind} new=${isNew} last_session=${lastSessionId || "<none>"})`);
+  const agentLabel = (env.AGENT_BACKEND || "codex").toLowerCase();
+  console.log(
+    `Prepared dispatch for ${key} (kind=${kind} new=${isNew} last_session=${lastSessionId || "<none>"} agent=${agentLabel})`,
+  );
 }
 
 async function recordRun() {
@@ -393,6 +420,7 @@ async function recordRun() {
   const block = [
     "",
     `## Run ${now}`,
+    `- agent_backend: ${env.AGENT_BACKEND || "codex"}`,
     `- run_kind: ${isNew ? "new" : "continuation"}`,
     `- prev_session_id: ${lastSessionId || "<none>"}`,
     `- new_session_id: ${newSessionId || "<none>"}`,
@@ -405,6 +433,7 @@ async function recordRun() {
   await writeFile(transcriptFile, block, { flag: "a" });
 
   await appendGithubEnv({ NEW_SESSION_ID: newSessionId });
+  await appendGithubOutput({ new_session_id: newSessionId || "" });
   console.log(`Recorded run for ${env.ISSUE_KEY}: session=${newSessionId || "<none>"}`);
 }
 
