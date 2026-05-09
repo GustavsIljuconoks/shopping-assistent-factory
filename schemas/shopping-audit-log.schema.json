@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shopping-assistent-factory.local/schemas/shopping-audit-log.schema.json",
+  "title": "Shopping Audit Log Entry",
+  "description": "One JSONL entry recording an action Bestfriend took on a retailer account.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "actionType",
+    "retailer",
+    "timestamp",
+    "status"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "description": "Version of the shopping audit log entry schema.",
+      "type": "integer",
+      "const": 1
+    },
+    "actionType": {
+      "description": "Retailer action Bestfriend attempted or completed.",
+      "type": "string",
+      "enum": ["search", "page_read", "cart_add", "cart_peek"]
+    },
+    "retailer": {
+      "description": "Retailer account or site the action targeted.",
+      "type": "string",
+      "minLength": 1
+    },
+    "timestamp": {
+      "description": "UTC ISO 8601 timestamp for when the action was recorded.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "status": {
+      "description": "Outcome state for the recorded action.",
+      "type": "string",
+      "enum": ["started", "succeeded", "failed"]
+    },
+    "screenshotPath": {
+      "description": "Optional local debug screenshot path captured for the action.",
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}
