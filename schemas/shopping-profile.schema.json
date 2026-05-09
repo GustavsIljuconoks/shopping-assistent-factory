@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shopping-assistent-factory.local/schemas/shopping-profile.schema.json",
+  "title": "Shopping Profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "country",
+    "currency",
+    "sizes",
+    "budgetAnchors",
+    "hardExclusions",
+    "perItemPriceCeiling",
+    "enabledRetailers"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "description": "Version of the shopping profile schema used by persisted profile data.",
+      "type": "integer",
+      "const": 1
+    },
+    "country": {
+      "description": "ISO 3166-1 alpha-2 country code used for retailer availability, shipping, and sizing context.",
+      "type": "string",
+      "pattern": "^[A-Z]{2}$"
+    },
+    "currency": {
+      "description": "ISO 4217 currency code used for all profile-level monetary values unless overridden.",
+      "type": "string",
+      "pattern": "^[A-Z]{3}$"
+    },
+    "sizes": {
+      "description": "Hard size constraints keyed by garment class, for example tops, bottoms, outerwear, shoes, underwear, or accessories.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["value"],
+        "properties": {
+          "value": {
+            "type": "string",
+            "minLength": 1
+          },
+          "system": {
+            "description": "Sizing system such as EU, UK, US, International, or brand-specific.",
+            "type": "string",
+            "minLength": 1
+          },
+          "notes": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "budgetAnchors": {
+      "description": "Budget reference points keyed by category or garment class.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["amount"],
+        "properties": {
+          "amount": {
+            "type": "number",
+            "minimum": 0
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "cadence": {
+            "type": "string",
+            "enum": ["per_item", "monthly", "seasonal", "annual"]
+          },
+          "notes": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "hardExclusions": {
+      "description": "Brands, materials, colors, patterns, retailers, or other non-negotiable exclusions.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "perItemPriceCeiling": {
+      "description": "Maximum allowed price for any single item.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["amount"],
+      "properties": {
+        "amount": {
+          "type": "number",
+          "minimum": 0
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        }
+      }
+    },
+    "enabledRetailers": {
+      "description": "Retailer identifiers or names that shopping tools are allowed to use.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    }
+  }
+}
