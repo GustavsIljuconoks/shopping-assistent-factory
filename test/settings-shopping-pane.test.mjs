@@ -5,10 +5,16 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import {
+  appendShoppingAuditEntry,
+  flushShoppingAuditLog,
+  readShoppingAuditLog,
+} from "../src/shopping-audit-log.mjs";
+import {
   CONNECTED_RETAILERS_EMPTY_STATE,
   DEFAULT_RETAILERS,
   SHOPPING_ACTIVITY_EMPTY_STATE,
   persistSettingsShoppingProfileChange,
+  readSettingsShoppingActivityAuditEntries,
   SHOPPING_MEMORY_FILTER_LABEL,
   SHOPPING_SETUP_PLACEHOLDER,
   renderRetailerProposalCard,
@@ -43,6 +49,109 @@ test("renders the Shopping activity pane without audit entries", () => {
   assert.match(html, /Privacy/);
   assert.match(html, /Shopping activity/);
   assert.match(html, new RegExp(SHOPPING_ACTIVITY_EMPTY_STATE));
+});
+
+test("renders shopping activity audit entries in reverse chronological order", () => {
+  const html = renderSettingsPrivacyPane({
+    auditEntries: [
+      {
+        actionType: "page_read",
+        retailer: "Zalando",
+        timestamp: "2026-05-09T13:00:00.000Z",
+        status: "succeeded",
+      },
+      {
+        actionType: "cart_add",
+        retailer: "ASOS",
+        timestamp: "2026-05-09T13:02:00.000Z",
+        status: "failed",
+        screenshotPath: "debug/asos-cart.png",
+      },
+      {
+        actionType: "size_select",
+        retailer: "Asket",
+        timestamp: "2026-05-09T13:01:00.000Z",
+        status: "started",
+      },
+    ],
+  });
+
+  assert.match(html, /data-shopping-activity-audit-pane/);
+  assert.match(html, /3 shopping activity entries available\./);
+  assert.match(html, /Action/);
+  assert.match(html, /Retailer/);
+  assert.match(html, /Timestamp/);
+  assert.match(html, /Status/);
+
+  assert.ok(html.indexOf("cart_add") < html.indexOf("size_select"));
+  assert.ok(html.indexOf("size_select") < html.indexOf("page_read"));
+  assert.match(html, /ASOS/);
+  assert.match(html, /2026-05-09T13:02:00\.000Z/);
+  assert.match(html, /failed/);
+  assert.match(html, /href="debug\/asos-cart\.png"[^>]*>Debug screenshot<\/a>/);
+});
+
+test("does not render debug screenshot links for non-failed audit entries", () => {
+  const html = renderSettingsPrivacyPane({
+    auditEntries: [
+      {
+        actionType: "cart_add",
+        retailer: "ASOS",
+        timestamp: "2026-05-09T13:02:00.000Z",
+        status: "succeeded",
+        screenshotPath: "debug/asos-cart.png",
+      },
+    ],
+  });
+
+  assert.doesNotMatch(html, /Debug screenshot/);
+  assert.match(html, /No debug screenshot/);
+});
+
+test("reads current shopping activity audit entries for refreshed privacy renders", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "settings-shopping-audit-"));
+  const auditLogPath = join(dir, "audit.jsonl");
+
+  try {
+    appendShoppingAuditEntry(
+      {
+        actionType: "page_read",
+        retailer: "Zalando",
+        status: "started",
+      },
+      auditLogPath,
+      { now: new Date("2026-05-09T13:00:00.000Z") },
+    );
+    await flushShoppingAuditLog();
+
+    const firstEntries = await readSettingsShoppingActivityAuditEntries({ auditLogPath });
+    const firstHtml = renderSettingsPrivacyPane({ auditEntries: firstEntries });
+
+    assert.match(firstHtml, /1 shopping activity entries available\./);
+    assert.match(firstHtml, /page_read/);
+
+    appendShoppingAuditEntry(
+      {
+        actionType: "cart_add",
+        retailer: "Zalando",
+        status: "failed",
+        screenshotPath: "debug/zalando-cart.png",
+      },
+      auditLogPath,
+      { now: new Date("2026-05-09T13:01:00.000Z") },
+    );
+    await flushShoppingAuditLog();
+
+    const refreshedEntries = await readSettingsShoppingActivityAuditEntries({ auditLogPath });
+    const refreshedHtml = renderSettingsPrivacyPane({ auditEntries: refreshedEntries });
+
+    assert.equal((await readShoppingAuditLog(auditLogPath)).length, 2);
+    assert.match(refreshedHtml, /2 shopping activity entries available\./);
+    assert.ok(refreshedHtml.indexOf("cart_add") < refreshedHtml.indexOf("page_read"));
+    assert.match(refreshedHtml, /href="debug\/zalando-cart\.png"[^>]*>Debug screenshot<\/a>/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("can still render the Settings Shopping section", () => {

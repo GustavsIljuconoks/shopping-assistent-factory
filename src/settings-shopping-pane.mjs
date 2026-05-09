@@ -3,6 +3,7 @@ import {
   readShoppingProfile,
   writeShoppingProfile,
 } from "./shopping-profile.mjs";
+import { readShoppingAuditLog } from "./shopping-audit-log.mjs";
 
 export const SETTINGS_SECTIONS = Object.freeze([
   {
@@ -212,11 +213,11 @@ function renderShoppingProfileEditor(profile) {
 }
 
 export function renderSettingsPrivacyPane({ auditEntries = [] } = {}) {
-  const entries = Array.isArray(auditEntries) ? auditEntries : [];
+  const entries = normalizeShoppingActivityAuditEntries(auditEntries);
   const activityState =
     entries.length === 0
       ? `<p class="settings-empty-state">${escapeHtml(SHOPPING_ACTIVITY_EMPTY_STATE)}</p>`
-      : `<p class="settings-status">${escapeHtml(`${entries.length} shopping activity entries available.`)}</p>`;
+      : renderShoppingActivityAuditList(entries);
 
   return [
     '<section id="privacy" class="settings-pane" aria-labelledby="privacy-heading">',
@@ -228,6 +229,10 @@ export function renderSettingsPrivacyPane({ auditEntries = [] } = {}) {
     "  </section>",
     "</section>",
   ].join("\n");
+}
+
+export async function readSettingsShoppingActivityAuditEntries({ auditLogPath } = {}) {
+  return normalizeShoppingActivityAuditEntries(await readShoppingAuditLog(auditLogPath));
 }
 
 export function renderSettingsMemoriesPane({ memories = [], activeFilter = SHOPPING_MEMORY_FILTER_LABEL } = {}) {
@@ -424,6 +429,41 @@ function renderConnectedRetailer(retailer) {
   ].join("\n      ");
 }
 
+function renderShoppingActivityAuditList(entries) {
+  return [
+    '<div class="shopping-activity-audit" data-shopping-activity-audit-pane aria-live="polite">',
+    `  <p class="settings-status">${escapeHtml(`${entries.length} shopping activity entries available.`)}</p>`,
+    '  <div class="shopping-activity-table" role="table" aria-label="Logged shopping actions">',
+    '    <div class="shopping-activity-row shopping-activity-row--head" role="row">',
+    '      <span role="columnheader">Action</span>',
+    '      <span role="columnheader">Retailer</span>',
+    '      <span role="columnheader">Timestamp</span>',
+    '      <span role="columnheader">Status</span>',
+    '      <span role="columnheader">Debug</span>',
+    "    </div>",
+    ...entries.map((entry) => renderShoppingActivityAuditEntry(entry)),
+    "  </div>",
+    "</div>",
+  ].join("\n    ");
+}
+
+function renderShoppingActivityAuditEntry(entry) {
+  const screenshotLink =
+    entry.status === "failed" && entry.screenshotPath
+      ? `<a href="${escapeHtml(entry.screenshotPath)}" target="_blank" rel="noreferrer">Debug screenshot</a>`
+      : '<span aria-label="No debug screenshot">-</span>';
+
+  return [
+    '    <div class="shopping-activity-row" role="row">',
+    `      <span role="cell">${escapeHtml(entry.actionType)}</span>`,
+    `      <span role="cell">${escapeHtml(entry.retailer)}</span>`,
+    `      <time role="cell" datetime="${escapeHtml(entry.timestamp)}">${escapeHtml(entry.timestamp)}</time>`,
+    `      <span role="cell" class="shopping-activity-status shopping-activity-status--${escapeHtml(entry.status)}">${escapeHtml(entry.status)}</span>`,
+    `      <span role="cell">${screenshotLink}</span>`,
+    "    </div>",
+  ].join("\n");
+}
+
 function renderMemoryItem(memory) {
   const pinned = memory.pinned ? "true" : "false";
   const tags = memory.tags.map((tag) => `<span class="memory-tag">${escapeHtml(tag)}</span>`).join("");
@@ -574,6 +614,37 @@ function normalizeMemories(memories) {
       timestamp: normalizeString(memory.timestamp, `memories[${index}].timestamp`),
     };
   }).sort((left, right) => Number(right.pinned) - Number(left.pinned) || right.timestamp.localeCompare(left.timestamp));
+}
+
+function normalizeShoppingActivityAuditEntries(auditEntries) {
+  if (!Array.isArray(auditEntries)) {
+    throw new TypeError("auditEntries must be an array.");
+  }
+
+  return auditEntries.map((entry, index) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new TypeError(`auditEntries[${index}] must be an object.`);
+    }
+
+    return {
+      actionType: normalizeString(entry.actionType, `auditEntries[${index}].actionType`),
+      retailer: normalizeString(entry.retailer, `auditEntries[${index}].retailer`),
+      timestamp: normalizeTimestampString(entry.timestamp, `auditEntries[${index}].timestamp`),
+      status: normalizeString(entry.status, `auditEntries[${index}].status`),
+      screenshotPath:
+        entry.screenshotPath === undefined
+          ? undefined
+          : normalizeString(entry.screenshotPath, `auditEntries[${index}].screenshotPath`),
+    };
+  }).sort((left, right) => right.timestamp.localeCompare(left.timestamp));
+}
+
+function normalizeTimestampString(value, field) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw new TypeError(`${field} must be a valid date or ISO timestamp.`);
+  }
+  return date.toISOString();
 }
 
 function normalizeTags(tags, field) {
