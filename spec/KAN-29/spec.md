@@ -1,6 +1,6 @@
 # KAN-29: Asket: product search tool
 
-Generated from Jira on 2026-05-09T14:14:26.580Z.
+Generated from Jira on 2026-05-09T14:31:58.744Z.
 
 ## Issue Details
 
@@ -9,14 +9,14 @@ Generated from Jira on 2026-05-09T14:14:26.580Z.
 | Key | KAN-29 |
 | Title | Asket: product search tool |
 | Type | Task |
-| Status | To Do |
+| Status | Done |
 | Priority | Medium |
 | Assignee | - |
 | Reporter | GustavsIljuconoks |
 | Labels | dark-factory-generated, dfp-2c01a01b4717 |
 | Components | - |
 | Created | 2026-05-09T16:12:25.786+0300 |
-| Updated | 2026-05-09T16:12:25.863+0300 |
+| Updated | 2026-05-09T17:26:07.372+0300 |
 
 ## Description
 
@@ -43,6 +43,29 @@ Suggested priority: high
 
 Estimated complexity: large
 
-## Comments (0)
+## Comments (1)
 
-_No comments._
+### GustavsIljuconoks on 2026-05-09T17:18:50.360+0300
+
+[TDF-bot] Codex processed KAN-29 (conclusion: success).
+
+Branch: [https://github.com/GustavsIljuconoks/shopping-assistent-factory/tree/tdf%2Fkan-29](https://github.com/GustavsIljuconoks/shopping-assistent-factory/tree/tdf%2Fkan-29)
+
+Pull request: [https://github.com/GustavsIljuconoks/shopping-assistent-factory/pull/11](https://github.com/GustavsIljuconoks/shopping-assistent-factory/pull/11)
+
+Implemented the Asket product search tool boundary.
+
+What changed:
+- Added `searchAsketProducts`, which accepts structured intent, builds an Asket search URL, uses the existing persistent Asket browser profile when a launcher is provided, and delegates page extraction to an injectable search adapter.
+- Normalizes, filters, scores, and returns up to 3 candidates with product URL, image URL, brand, title, size, color, price, and one-line reasoning.
+- Filters out candidates above the price ceiling, mismatched currency, mismatched size/color/garment class, and returns an empty list when nothing matches.
+- Added focused tests for ranking, filtering, empty results, adapter payloads, and browser/profile integration.
+
+Verification:
+- `node --check src/asket-product-search.mjs`
+- `node --check test/asket-product-search.test.mjs`
+- `node --test test/asket-product-search.test.mjs`
+- `node --test test/*.test.mjs`
+
+Risk:
+- The repo still uses adapter-style browser boundaries, so production needs a concrete Asket page extraction adapter to pass raw products into this tool.
