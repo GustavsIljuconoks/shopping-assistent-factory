@@ -46,36 +46,20 @@ jobs:
           JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
         run: node .github/scripts/jira-dispatch.mjs prepare-dispatch
 
-      - name: Run Codex
+      - name: Install dependencies
         if: env.SHOULD_RUN == 'true'
-        id: codex
+        run: npm install
+
+      - name: Run Cursor Agent
+        if: env.SHOULD_RUN == 'true'
+        id: cursor
+        env:
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
         shell: bash
         run: |
-          set -uo pipefail
-          mkdir -p "$RUN_DIR"
-          last_msg="$RUN_DIR/last_message.txt"
-          events_log="$RUN_DIR/events.jsonl"
-          : > "$last_msg"
-          : > "$events_log"
-
-          codex exec \
-            --json \
-            --skip-git-repo-check \
-            --output-last-message "$last_msg" \
-            --dangerously-bypass-approvals-and-sandbox \
-            --cd "$GITHUB_WORKSPACE" \
-            - < "$PROMPT_FILE" 2>&1 | tee "$events_log"
-          rc=${PIPESTATUS[0]}
-
-          if [ "$rc" -eq 0 ]; then
-            echo "CONCLUSION=success" >> "$GITHUB_ENV"
-          else
-            echo "CONCLUSION=failure" >> "$GITHUB_ENV"
-          fi
-          echo "EXECUTION_FILE=$events_log" >> "$GITHUB_ENV"
-          echo "LAST_MESSAGE_FILE=$last_msg" >> "$GITHUB_ENV"
-          # Always exit 0; final-status step decides overall workflow outcome.
-          exit 0
+          node .github/scripts/cursor-runner.mjs || true
+          # cursor-runner.mjs writes CONCLUSION, EXECUTION_FILE, LAST_MESSAGE_FILE
+          # to $GITHUB_ENV itself; exit 0 so downstream steps always run.
 
       - name: Record run outputs
         if: env.SHOULD_RUN == 'true'
@@ -114,7 +98,7 @@ jobs:
         shell: bash
         run: |
           if [ "${CONCLUSION:-failure}" != "success" ]; then
-            echo "Codex run concluded as ${CONCLUSION:-failure}; failing the workflow."
+            echo "Cursor agent run concluded as ${CONCLUSION:-failure}; failing the workflow."
             exit 1
           fi
-          echo "Codex run succeeded."
+          echo "Cursor agent run succeeded."
