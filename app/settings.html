@@ -150,7 +150,8 @@
 
       .proposal-card-header,
       .proposal-card-footer,
-      .proposal-staged-result {
+      .proposal-staged-result,
+      .proposal-failure-result {
         display: flex;
         gap: 12px;
         justify-content: space-between;
@@ -293,9 +294,19 @@
         border-color: var(--accent);
       }
 
+      .proposal-card--failed {
+        border-color: #b42318;
+      }
+
       .proposal-staged-result {
         align-items: baseline;
         background: var(--accent-soft);
+      }
+
+      .proposal-failure-result {
+        align-items: baseline;
+        background: #fef3f2;
+        color: #912018;
       }
 
       @media (max-width: 720px) {

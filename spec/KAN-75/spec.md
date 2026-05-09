@@ -1,6 +1,6 @@
 # KAN-75: Failure card UI
 
-Generated from Jira on 2026-05-09T16:19:02.701Z.
+Generated from Jira on 2026-05-09T18:03:07.280Z.
 
 ## Issue Details
 
@@ -9,14 +9,14 @@ Generated from Jira on 2026-05-09T16:19:02.701Z.
 | Key | KAN-75 |
 | Title | Failure card UI |
 | Type | Task |
-| Status | To Do |
+| Status | In Progress |
 | Priority | Medium |
 | Assignee | - |
 | Reporter | GustavsIljuconoks |
 | Labels | dark-factory-generated, dfp-ce73bb99982d |
 | Components | - |
 | Created | 2026-05-09T16:13:15.994+0300 |
-| Updated | 2026-05-09T16:13:16.149+0300 |
+| Updated | 2026-05-09T19:23:17.817+0300 |
 
 ## Description
 
@@ -43,6 +43,12 @@ Suggested priority: medium
 
 Estimated complexity: medium
 
-## Comments (0)
+## Comments (1)
 
-_No comments._
+### GustavsIljuconoks on 2026-05-09T19:19:06.560+0300
+
+[TDF-bot] Codex processed KAN-75 (conclusion: unknown).
+
+Branch: [https://github.com/GustavsIljuconoks/shopping-assistent-factory/tree/tdf%2Fkan-75](https://github.com/GustavsIljuconoks/shopping-assistent-factory/tree/tdf%2Fkan-75)
+
+Pull request: [https://github.com/GustavsIljuconoks/shopping-assistent-factory/pull/29](https://github.com/GustavsIljuconoks/shopping-assistent-factory/pull/29)

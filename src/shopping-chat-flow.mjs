@@ -10,6 +10,7 @@ export const SHOPPING_CHAT_LOW_CONFIDENCE_MESSAGE =
   "I found shopping intent, but I am not confident enough to make a proposal yet.";
 export const ASKET_CART_URL = "https://www.asket.com/cart";
 export const ASOS_CART_URL = "https://www.asos.com/basket/";
+export const SHOPPING_FEED_ITEM_TYPE = "shopping_feed_item";
 
 const DEFAULT_MIN_PROPOSAL_CONFIDENCE = 0.7;
 const DEFAULT_PROFILE_CONFIRMATION_MESSAGE = "Got it. I saved that to your shopping profile.";
@@ -158,7 +159,17 @@ export async function handleShoppingChatMessage({
     priceCeiling,
     size,
   };
-  const searchResult = await searchTool.search(searchContext);
+  const enabledRetailers = normalizeEnabledRetailers(profile?.enabledRetailers);
+  const searchResult =
+    enabledRetailers.length === 0
+      ? await searchTool.search(searchContext)
+      : await searchEnabledRetailersInParallel({
+          context: searchContext,
+          enabledRetailers,
+          renderProposalCard,
+          searchTool,
+          chat,
+        });
   const confidence = normalizeConfidence(searchResult?.confidence);
 
   if (confidence < minProposalConfidence) {
@@ -253,6 +264,7 @@ export function createProfileConfirmationCard(profileFact) {
 export async function stageSelectedAsketCandidates({
   selectedCandidates,
   page,
+  browserRun,
   auditLogPath,
   stageCartItem = stageAsketCartItem,
   refreshActiveCarts,
@@ -339,10 +351,20 @@ export async function stageSelectedAsketCandidates({
 }
 
 export function renderAsketStagingResultCard({
+  results = [],
   stagedCount,
   totalSelected,
   cartUrl = ASKET_CART_URL,
 } = {}) {
+  const failure = findFirstStagingFailure(results);
+  if (failure) {
+    return renderRetailerStagingFailureCard({
+      cartUrl,
+      failure,
+      retailer: ASKET_RETAILER,
+    });
+  }
+
   return {
     openCartLink: {
       href: normalizeUrl(cartUrl, "cartUrl"),
@@ -356,10 +378,20 @@ export function renderAsketStagingResultCard({
 }
 
 export function renderAsosStagingResultCard({
+  results = [],
   stagedCount,
   totalSelected,
   cartUrl = ASOS_CART_URL,
 } = {}) {
+  const failure = findFirstStagingFailure(results);
+  if (failure) {
+    return renderRetailerStagingFailureCard({
+      cartUrl,
+      failure,
+      retailer: ASOS_RETAILER,
+    });
+  }
+
   return {
     openCartLink: {
       href: normalizeUrl(cartUrl, "cartUrl"),
@@ -372,9 +404,84 @@ export function renderAsosStagingResultCard({
   };
 }
 
+export async function searchEnabledRetailersInParallel({
+  context,
+  enabledRetailers,
+  searchTool,
+  renderProposalCard,
+  chat,
+} = {}) {
+  const retailers = normalizeEnabledRetailers(enabledRetailers);
+  if (retailers.length === 0) {
+    return {
+      cards: [],
+      confidence: 0,
+      retailerResults: [],
+      type: "multi_retailer_proposal",
+    };
+  }
+  if (!context || typeof context !== "object" || Array.isArray(context)) {
+    throw new TypeError("search context must be an object.");
+  }
+  if (!searchTool || typeof searchTool.search !== "function") {
+    throw new TypeError("searchTool.search must be a function.");
+  }
+
+  const retailerResults = await Promise.all(
+    retailers.map(async (retailer, index) => {
+      const result = await searchTool.search({
+        ...context,
+        retailer,
+        retailerIdentifier: retailer,
+      });
+      const normalized = normalizeRetailerSearchResult(result, retailer, index);
+      if (normalized.candidates.length > 0) {
+        await publishIncrementalProposalCard({
+          chat,
+          context,
+          renderProposalCard,
+          retailerResult: normalized,
+        });
+      }
+      return normalized;
+    }),
+  );
+
+  const cards = assembleMultiRetailerProposal(retailerResults);
+
+  return {
+    cards,
+    confidence: cards.length === 0 ? 0 : Math.max(...cards.map((card) => card.confidence)),
+    retailerResults,
+    type: "multi_retailer_proposal",
+  };
+}
+
+export function assembleMultiRetailerProposal(retailerResults, { maxCandidatesPerRetailer = 3 } = {}) {
+  if (!Array.isArray(retailerResults)) {
+    throw new TypeError("retailerResults must be an array.");
+  }
+  const candidateLimit = normalizePositiveInteger(maxCandidatesPerRetailer, "maxCandidatesPerRetailer");
+
+  return retailerResults
+    .map((result, index) => normalizeRetailerSearchResult(result, result?.retailer, index))
+    .filter((result) => result.candidates.length > 0)
+    .map((result) => ({
+      ...result,
+      candidates: result.candidates.slice(0, candidateLimit),
+    }))
+    .sort(
+      (left, right) =>
+        right.overallMatchScore - left.overallMatchScore ||
+        right.confidence - left.confidence ||
+        left.index - right.index,
+    );
+}
+
 export async function stageSelectedAsosCandidates({
   selectedCandidates,
   page,
+  browserRun,
   auditLogPath,
   stageCartItem = stageAsosCartItem,
   refreshActiveCarts,
@@ -402,6 +509,7 @@ export async function stageSelectedAsosCandidates({
     const result = await stageCartItem({
       auditLogPath,
       page,
+      browserRun,
       productId: candidate.productId,
       productUrl: candidate.productUrl,
       size: candidate.size,
@@ -447,7 +555,7 @@ export async function stageSelectedAsosCandidates({
     activeCarts,
     cartUrl,
     circuitBreakerState: nextCircuitBreakerState,
-    feedItems,
+    feedItems: createStagingResultFeedItems(results, ASOS_RETAILER),
     resultCard: await renderResultCard({
       cartUrl,
       results,
@@ -458,6 +566,78 @@ export async function stageSelectedAsosCandidates({
     stagedCount,
     totalSelected: candidates.length,
   };
+}
+
+export function createStagedAtRetailerFeedItem(retailer) {
+  return createRetailerFeedItem({
+    event: "staging_succeeded",
+    retailer,
+    title: `Staged at ${normalizeNonEmptyString(retailer, "retailer")}`,
+  });
+}
+
+export function createStagingFailedAtRetailerFeedItem(retailer) {
+  return createRetailerFeedItem({
+    event: "staging_failed",
+    retailer,
+    title: `Staging failed at ${normalizeNonEmptyString(retailer, "retailer")}`,
+  });
+}
+
+export function renderRetailerStagingFailureCard({
+  cartUrl,
+  failure,
+  retailer,
+} = {}) {
+  const normalizedRetailer = normalizeNonEmptyString(retailer, "retailer");
+  const failedResult = failure?.result && typeof failure.result === "object" ? failure.result : {};
+  const failedCandidate = failure?.candidate && typeof failure.candidate === "object" ? failure.candidate : {};
+  const manualUrl = failedResult.productUrl ?? failedCandidate.productUrl ?? cartUrl;
+
+  return {
+    explanation: createStagingFailureExplanation({
+      error: failedResult.error,
+      reason: failedResult.reason,
+      retailer: normalizedRetailer,
+      status: failedResult.status,
+    }),
+    manualLink: {
+      href: normalizeUrl(manualUrl, "manualUrl"),
+      label: `Open in ${normalizedRetailer} to complete manually`,
+    },
+    retailer: normalizedRetailer,
+    status: normalizeNonEmptyString(failedResult.status ?? "error", "failure status"),
+    type: "retailer_staging_failure_card",
+  };
+}
+
+export function createStagingFailureExplanation({
+  error,
+  reason,
+  retailer,
+  status,
+} = {}) {
+  const normalizedRetailer = normalizeNonEmptyString(retailer, "retailer");
+  const normalizedStatus = typeof status === "string" ? status.trim().toLowerCase() : "error";
+
+  if (normalizedStatus === "out_of_stock") {
+    return "Item out of stock";
+  }
+  if (normalizedStatus === "login_expired") {
+    return "Login expired";
+  }
+  if (isAntiBotFailure(`${reason ?? ""} ${error ?? ""}`)) {
+    return `Staging blocked by ${normalizedRetailer} - anti-bot challenge`;
+  }
+  return "Site error";
+}
+
+export function createDiscoveryOnlyRetailerFeedItem(retailer) {
+  return createRetailerFeedItem({
+    event: "discovery_only",
+    retailer,
+    title: `${normalizeNonEmptyString(retailer, "retailer")} in discovery-only mode`,
+  });
 }
 
 export function detectShoppingIntent(message) {
@@ -853,6 +1033,72 @@ async function publishPlainText(chat, message, payload) {
   }
 }
 
+async function publishIncrementalProposalCard({ chat, context, renderProposalCard, retailerResult }) {
+  if (!chat || typeof chat.showProposalCard !== "function" || typeof renderProposalCard !== "function") {
+    return;
+  }
+
+  const proposalCard = await renderProposalCard(retailerResult, {
+    ...context,
+    retailer: retailerResult.retailer,
+    retailerIdentifier: retailerResult.retailer,
+  });
+  await chat.showProposalCard(proposalCard, {
+    context,
+    retailerResult,
+  });
+}
+
+function createStagingResultFeedItems(results, retailer) {
+  if (!Array.isArray(results) || results.length === 0) {
+    return [];
+  }
+
+  const hasSuccess = results.some(({ result }) => result?.status === "success");
+  const hasFailure = results.some(({ result }) => result?.status && result.status !== "success");
+  const feedItems = [];
+
+  if (hasSuccess) {
+    feedItems.push(createStagedAtRetailerFeedItem(retailer));
+  }
+  if (hasFailure) {
+    feedItems.push(createStagingFailedAtRetailerFeedItem(retailer));
+  }
+
+  return feedItems;
+}
+
+function findFirstStagingFailure(results) {
+  if (!Array.isArray(results)) {
+    return undefined;
+  }
+  return results.find(({ result }) => result?.status && result.status !== "success");
+}
+
+async function foregroundStagingFailurePage({ browserRun, page } = {}) {
+  if (browserRun && typeof browserRun.foregroundCurrentPage === "function") {
+    await browserRun.foregroundCurrentPage();
+    return;
+  }
+  if (page && typeof page.bringToFront === "function") {
+    await page.bringToFront();
+  }
+}
+
+function isAntiBotFailure(message) {
+  return /\b(anti-?bot|bot|captcha|challenge|cloudflare|access denied|blocked)\b/i.test(String(message));
+}
+
+function createRetailerFeedItem({ event, retailer, title }) {
+  const normalizedRetailer = normalizeNonEmptyString(retailer, "retailer");
+  return {
+    event: normalizeNonEmptyString(event, "event"),
+    retailer: normalizedRetailer,
+    title: normalizeNonEmptyString(title, "title"),
+    type: SHOPPING_FEED_ITEM_TYPE,
+  };
+}
+
 function detectGarmentWord(text) {
   return Object.values(GARMENT_CLASS_ALIASES).some((aliases) =>
     aliases.some((alias) => hasWord(text, alias)),
@@ -871,6 +1117,66 @@ function normalizeConfidence(value) {
     return 0;
   }
   return Math.max(0, Math.min(1, value));
+}
+
+function normalizeEnabledRetailers(enabledRetailers) {
+  if (enabledRetailers === undefined) {
+    return [];
+  }
+  if (!Array.isArray(enabledRetailers)) {
+    throw new TypeError("enabledRetailers must be an array.");
+  }
+
+  return [...new Set(enabledRetailers.map((retailer) => normalizeNonEmptyString(retailer, "enabledRetailer")))];
+}
+
+function normalizeRetailerSearchResult(result, fallbackRetailer, index = 0) {
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    throw new TypeError("retailer search result must be an object.");
+  }
+
+  const retailer = normalizeNonEmptyString(
+    result.retailer ?? result.retailerName ?? result.retailerIdentifier ?? fallbackRetailer,
+    "retailer",
+  );
+  const candidates = normalizeRetailerCandidates(result.candidates ?? result.items ?? []);
+  const confidence = normalizeConfidence(result.confidence ?? (candidates.length > 0 ? 1 : 0));
+  const overallMatchScore = normalizeRetailerScore(
+    result.overallMatchScore ?? result.matchScore ?? result.score,
+    candidates,
+    confidence,
+  );
+
+  return {
+    ...result,
+    candidates,
+    confidence,
+    index: normalizeNonNegativeInteger(index, "retailer result index"),
+    overallMatchScore,
+    retailer,
+  };
+}
+
+function normalizeRetailerCandidates(candidates) {
+  if (!Array.isArray(candidates)) {
+    throw new TypeError("retailer search candidates must be an array.");
+  }
+  return candidates.slice(0, 3);
+}
+
+function normalizeRetailerScore(value, candidates, confidence) {
+  const score = Number(value ?? candidates[0]?.overallMatchScore ?? candidates[0]?.matchScore ?? candidates[0]?.score);
+  if (Number.isFinite(score)) {
+    return score;
+  }
+  return confidence;
+}
+
+function normalizePositiveInteger(value, field) {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new TypeError(`${field} must be a positive integer.`);
+  }
+  return value;
 }
 
 function normalizeCurrency(value) {

@@ -331,6 +331,25 @@ test("renders discovery-only proposal cards with a manual open link instead of S
   assert.match(html, /Open in ASOS to add manually/);
   assert.match(html, /href="https:\/\/www\.asos\.com\/asos-design\/product\/prd\/123"/);
   assert.doesNotMatch(html, /proposal-stage-button/);
+test("renders failed proposal as a failure card with manual completion link", () => {
+  const html = renderRetailerProposalCard(
+    createProposalCard({
+      retailer: "ASOS",
+      stagingStatus: "login_expired",
+      failure: {
+        explanation: "Login expired",
+        manualUrl: "https://www.asos.com/product/123",
+      },
+    }),
+  );
+
+  assert.match(html, /proposal-card--failed/);
+  assert.match(html, /aria-label="ASOS staging failure"/);
+  assert.match(html, /Login expired/);
+  assert.match(html, /Open in ASOS to complete manually/);
+  assert.match(html, /href="https:\/\/www\.asos\.com\/product\/123"/);
+  assert.doesNotMatch(html, /proposal-candidate-list/);
+  assert.match(html, /<button type="button" class="proposal-stage-button" disabled>/);
 });
 
 function createProposalCard(overrides = {}) {

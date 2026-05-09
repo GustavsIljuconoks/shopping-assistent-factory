@@ -1,0 +1,15 @@
+Implemented KAN-78.
+
+Changed `src/shopping-chat-flow.mjs` so Asket and ASOS staging results now include `feedItems`:
+- `Staged at [Retailer]` after successful staging
+- `Staging failed at [Retailer]` when any staging result fails
+- Added `createDiscoveryOnlyRetailerFeedItem()` for `[Retailer] in discovery-only mode`
+
+Updated `test/shopping-chat-flow.test.mjs`, `spec/KAN-78/plan.md`, and `spec/KAN-78/response.md`.
+
+Verification passed:
+- `node --check src/shopping-chat-flow.mjs`
+- `node --check test/shopping-chat-flow.test.mjs`
+- `node --test test/shopping-chat-flow.test.mjs`
+
+Note: `spec/KAN-78/spec.md` and the new `runs/` folder were already workflow-generated changes; I left them untouched.

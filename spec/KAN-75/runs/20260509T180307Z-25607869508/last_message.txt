@@ -1,0 +1,10 @@
+Implemented KAN-75.
+
+Changes made:
+- Added failure result cards for staging failures with plain-English explanations.
+- Updated proposal card rendering so failures replace the proposal list and include `Open in [retailer] to complete manually`.
+- Added browser/page foregrounding on staging failure.
+- Updated `spec/KAN-75/plan.md` and wrote `spec/KAN-75/response.md`.
+
+Validation passed:
+- `node --test test/*.test.mjs` passed, 128 tests.

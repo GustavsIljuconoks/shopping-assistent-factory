@@ -5,12 +5,15 @@ import {
   ASKET_CART_URL,
   ASOS_CART_URL,
   SHOPPING_CHAT_LOW_CONFIDENCE_MESSAGE,
+  createStagingFailureExplanation,
+  createDiscoveryOnlyRetailerFeedItem,
   createProfileConfirmationCard,
   detectShoppingIntent,
   findMissingBootstrapField,
   handleShoppingChatMessage,
   renderAsketStagingResultCard,
   renderAsosStagingResultCard,
+  renderRetailerStagingFailureCard,
   stageSelectedAsketCandidates,
   stageSelectedAsosCandidates,
 } from "../src/shopping-chat-flow.mjs";
@@ -111,6 +114,95 @@ test("uses profile size and budget before dispatching search and rendering a pro
   ]);
   assert.deepEqual(cards, [["asket-shirt-1", "tops"]]);
   assert.deepEqual(result.proposalCard, { type: "proposal_card", itemId: "asket-shirt-1" });
+});
+
+test("searches enabled retailers in parallel and assembles sorted non-empty proposal cards", async () => {
+  const started = [];
+  const incrementalCards = [];
+  const gates = new Map([
+    ["Slow Retailer", createDeferred()],
+    ["Fast Retailer", createDeferred()],
+    ["Empty Retailer", createDeferred()],
+  ]);
+
+  const pending = handleShoppingChatMessage({
+    chat: {
+      async showProposalCard(card, payload) {
+        incrementalCards.push([card.retailer, payload.retailerResult.candidates.length]);
+      },
+    },
+    message: "Find black shirt",
+    profile: {
+      country: "LV",
+      currency: "EUR",
+      enabledRetailers: ["Slow Retailer", "Fast Retailer", "Empty Retailer"],
+      sizes: {
+        shoes: { value: "42", system: "EU" },
+        tops: { value: "M", system: "International" },
+      },
+      budgetAnchors: {
+        default: { amount: 100, currency: "EUR", cadence: "per_item" },
+      },
+    },
+    searchTool: {
+      async search(context) {
+        started.push(context.retailer);
+        return gates.get(context.retailer).promise;
+      },
+    },
+    async renderProposalCard(searchResult) {
+      return {
+        retailer: searchResult.retailer,
+        type: searchResult.type ?? "retailer_proposal_card",
+      };
+    },
+  });
+
+  await Promise.resolve();
+  assert.deepEqual(started, ["Slow Retailer", "Fast Retailer", "Empty Retailer"]);
+
+  gates.get("Fast Retailer").resolve({
+    retailer: "Fast Retailer",
+    confidence: 0.81,
+    overallMatchScore: 72,
+    candidates: [createSearchCandidate("fast-1")],
+  });
+  await flushAsyncWork();
+  assert.deepEqual(incrementalCards, [["Fast Retailer", 1]]);
+
+  gates.get("Empty Retailer").resolve({
+    retailer: "Empty Retailer",
+    confidence: 0.95,
+    overallMatchScore: 99,
+    candidates: [],
+  });
+  gates.get("Slow Retailer").resolve({
+    retailer: "Slow Retailer",
+    confidence: 0.9,
+    overallMatchScore: 88,
+    candidates: [
+      createSearchCandidate("slow-1"),
+      createSearchCandidate("slow-2"),
+      createSearchCandidate("slow-3"),
+      createSearchCandidate("slow-4"),
+    ],
+  });
+
+  const result = await pending;
+
+  assert.equal(result.action, "proposal_card");
+  assert.deepEqual(
+    result.searchResult.cards.map((card) => [card.retailer, card.candidates.length, card.overallMatchScore]),
+    [
+      ["Slow Retailer", 3, 88],
+      ["Fast Retailer", 1, 72],
+    ],
+  );
+  assert.equal(result.searchResult.confidence, 0.9);
+  assert.deepEqual(incrementalCards, [
+    ["Fast Retailer", 1],
+    ["Slow Retailer", 3],
+  ]);
 });
 
 test("asks lazy bootstrap questions for the first missing shopping profile field", async () => {
@@ -337,6 +429,14 @@ test("stages selected Asket candidates in sequence and refreshes active carts af
   assert.equal(result.stagedCount, 2);
   assert.equal(result.totalSelected, 2);
   assert.deepEqual(result.activeCarts, [{ itemCount: 2, retailer: "Asket" }]);
+  assert.deepEqual(result.feedItems, [
+    {
+      event: "staging_succeeded",
+      retailer: "Asket",
+      title: "Staged at Asket",
+      type: "shopping_feed_item",
+    },
+  ]);
   assert.deepEqual(result.resultCard, {
     openCartLink: {
       href: ASKET_CART_URL,
@@ -351,8 +451,14 @@ test("stages selected Asket candidates in sequence and refreshes active carts af
 
 test("does not refresh active carts for unsuccessful staging results", async () => {
   const updates = [];
+  const foregroundEvents = [];
 
   const result = await stageSelectedAsketCandidates({
+    page: {
+      async bringToFront() {
+        foregroundEvents.push("page");
+      },
+    },
     selectedCandidates: [
       {
         productUrl: "https://www.asket.com/products/the-t-shirt",
@@ -384,6 +490,31 @@ test("does not refresh active carts for unsuccessful staging results", async () 
     updates.map((update) => update.stagedCount),
     [1],
   );
+  assert.deepEqual(foregroundEvents, ["page"]);
+  assert.deepEqual(result.feedItems, [
+    {
+      event: "staging_succeeded",
+      retailer: "Asket",
+      title: "Staged at Asket",
+      type: "shopping_feed_item",
+    },
+    {
+      event: "staging_failed",
+      retailer: "Asket",
+      title: "Staging failed at Asket",
+      type: "shopping_feed_item",
+    },
+  ]);
+  assert.deepEqual(result.resultCard, {
+    explanation: "Item out of stock",
+    manualLink: {
+      href: "https://www.asket.com/products/the-t-shirt",
+      label: "Open in Asket to complete manually",
+    },
+    retailer: "Asket",
+    status: "out_of_stock",
+    type: "retailer_staging_failure_card",
+  });
 });
 
 test("records Asket staging failures and emits a feed item when discovery-only starts", async () => {
@@ -479,6 +610,7 @@ test("returns an Asket result card for zero selected candidates without staging"
 
   assert.equal(touchedCart, false);
   assert.equal(result.stagedCount, 0);
+  assert.deepEqual(result.feedItems, []);
   assert.deepEqual(renderAsketStagingResultCard({ stagedCount: 0, totalSelected: 0 }), {
     openCartLink: {
       href: ASKET_CART_URL,
@@ -544,6 +676,14 @@ test("stages selected ASOS candidates in sequence and refreshes active carts aft
   );
   assert.equal(result.action, "asos_staging_result");
   assert.equal(result.stagedCount, 2);
+  assert.deepEqual(result.feedItems, [
+    {
+      event: "staging_succeeded",
+      retailer: "ASOS",
+      title: "Staged at ASOS",
+      type: "shopping_feed_item",
+    },
+  ]);
   assert.deepEqual(result.resultCard, {
     openCartLink: {
       href: ASOS_CART_URL,
@@ -567,6 +707,7 @@ test("returns an ASOS result card for zero selected candidates without staging",
   });
 
   assert.equal(touchedCart, false);
+  assert.deepEqual(result.feedItems, []);
   assert.deepEqual(renderAsosStagingResultCard({ stagedCount: 0, totalSelected: 0 }), {
     openCartLink: {
       href: ASOS_CART_URL,
@@ -579,10 +720,75 @@ test("returns an ASOS result card for zero selected candidates without staging",
   });
 });
 
+test("returns plain-English staging failure cards", () => {
+  assert.equal(
+    createStagingFailureExplanation({
+      error: "Cloudflare challenge blocked automation",
+      retailer: "ASOS",
+      status: "error",
+    }),
+    "Staging blocked by ASOS - anti-bot challenge",
+  );
+  assert.equal(
+    createStagingFailureExplanation({ retailer: "Asket", status: "login_expired" }),
+    "Login expired",
+  );
+  assert.deepEqual(
+    renderRetailerStagingFailureCard({
+      cartUrl: "https://www.asos.com/basket/",
+      failure: {
+        candidate: { productUrl: "https://www.asos.com/product/123" },
+        result: { status: "error", error: "Site returned 500" },
+      },
+      retailer: "ASOS",
+    }),
+    {
+      explanation: "Site error",
+      manualLink: {
+        href: "https://www.asos.com/product/123",
+        label: "Open in ASOS to complete manually",
+      },
+      retailer: "ASOS",
+      status: "error",
+      type: "retailer_staging_failure_card",
+    },
+  );
+});
+
+test("creates a discovery-only Feed item for retailer circuit-breaker mode", () => {
+  assert.deepEqual(createDiscoveryOnlyRetailerFeedItem("Zalando.lv"), {
+    event: "discovery_only",
+    retailer: "Zalando.lv",
+    title: "Zalando.lv in discovery-only mode",
+    type: "shopping_feed_item",
+  });
+});
+
 function failSearchTool() {
   return {
     async search() {
       throw new Error("search should not be called");
     },
   };
+}
+
+function createDeferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, reject, resolve };
+}
+
+function createSearchCandidate(id) {
+  return {
+    id,
+    title: id,
+  };
+}
+
+function flushAsyncWork() {
+  return new Promise((resolve) => setImmediate(resolve));
 }
