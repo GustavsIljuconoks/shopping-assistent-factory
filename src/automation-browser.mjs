@@ -71,6 +71,18 @@ export class VisibleAutomationBrowserRun {
     };
   }
 
+  async foregroundCurrentPage() {
+    const run = this.requireCurrentRun();
+
+    if (!run.headless) {
+      await foregroundBrowser({ session: run.session, windowManager: this.windowManager });
+    }
+
+    return {
+      status: "foregrounded",
+    };
+  }
+
   async completeSuccessfully() {
     const run = this.requireCurrentRun();
 
