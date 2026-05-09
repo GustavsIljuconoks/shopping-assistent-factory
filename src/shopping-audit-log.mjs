@@ -6,6 +6,7 @@ export const DEFAULT_SHOPPING_AUDIT_LOG_PATH = "data/shopping-audit-log.jsonl";
 export const SHOPPING_AUDIT_ACTION_TYPES = Object.freeze([
   "search",
   "page_read",
+  "size_select",
   "cart_add",
   "cart_peek",
 ]);
