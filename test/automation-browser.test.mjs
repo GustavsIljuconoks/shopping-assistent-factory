@@ -96,6 +96,26 @@ test("keeps the browser foregrounded and publishes Waiting when a challenge is e
   assert.equal(browserRun.isActive, true);
 });
 
+test("can foreground the active browser again after a staging failure", async () => {
+  const events = [];
+  const launcher = {
+    async launch() {
+      return {
+        async foreground() {
+          events.push(["foreground"]);
+        },
+      };
+    },
+  };
+  const browserRun = new VisibleAutomationBrowserRun({ launcher });
+
+  await browserRun.startStagingRun({ retailer: "Asket" });
+  const foregrounded = await browserRun.foregroundCurrentPage();
+
+  assert.deepEqual(foregrounded, { status: "foregrounded" });
+  assert.deepEqual(events, [["foreground"], ["foreground"]]);
+});
+
 test("publishes Waiting when a Cloudflare-style challenge page is detected", async () => {
   const events = [];
   const session = {

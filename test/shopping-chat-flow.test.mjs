@@ -5,6 +5,7 @@ import {
   ASKET_CART_URL,
   ASOS_CART_URL,
   SHOPPING_CHAT_LOW_CONFIDENCE_MESSAGE,
+  createStagingFailureExplanation,
   createDiscoveryOnlyRetailerFeedItem,
   createProfileConfirmationCard,
   detectShoppingIntent,
@@ -12,6 +13,7 @@ import {
   handleShoppingChatMessage,
   renderAsketStagingResultCard,
   renderAsosStagingResultCard,
+  renderRetailerStagingFailureCard,
   stageSelectedAsketCandidates,
   stageSelectedAsosCandidates,
 } from "../src/shopping-chat-flow.mjs";
@@ -355,8 +357,14 @@ test("stages selected Asket candidates in sequence and refreshes active carts af
 
 test("does not refresh active carts for unsuccessful staging results", async () => {
   const updates = [];
+  const foregroundEvents = [];
 
   const result = await stageSelectedAsketCandidates({
+    page: {
+      async bringToFront() {
+        foregroundEvents.push("page");
+      },
+    },
     selectedCandidates: [
       {
         productUrl: "https://www.asket.com/products/the-t-shirt",
@@ -388,6 +396,7 @@ test("does not refresh active carts for unsuccessful staging results", async () 
     updates.map((update) => update.stagedCount),
     [1],
   );
+  assert.deepEqual(foregroundEvents, ["page"]);
   assert.deepEqual(result.feedItems, [
     {
       event: "staging_succeeded",
@@ -402,6 +411,16 @@ test("does not refresh active carts for unsuccessful staging results", async () 
       type: "shopping_feed_item",
     },
   ]);
+  assert.deepEqual(result.resultCard, {
+    explanation: "Item out of stock",
+    manualLink: {
+      href: "https://www.asket.com/products/the-t-shirt",
+      label: "Open in Asket to complete manually",
+    },
+    retailer: "Asket",
+    status: "out_of_stock",
+    type: "retailer_staging_failure_card",
+  });
 });
 
 test("returns an Asket result card for zero selected candidates without staging", async () => {
@@ -524,6 +543,41 @@ test("returns an ASOS result card for zero selected candidates without staging",
     totalSelected: 0,
     type: "asos_staging_result_card",
   });
+});
+
+test("returns plain-English staging failure cards", () => {
+  assert.equal(
+    createStagingFailureExplanation({
+      error: "Cloudflare challenge blocked automation",
+      retailer: "ASOS",
+      status: "error",
+    }),
+    "Staging blocked by ASOS - anti-bot challenge",
+  );
+  assert.equal(
+    createStagingFailureExplanation({ retailer: "Asket", status: "login_expired" }),
+    "Login expired",
+  );
+  assert.deepEqual(
+    renderRetailerStagingFailureCard({
+      cartUrl: "https://www.asos.com/basket/",
+      failure: {
+        candidate: { productUrl: "https://www.asos.com/product/123" },
+        result: { status: "error", error: "Site returned 500" },
+      },
+      retailer: "ASOS",
+    }),
+    {
+      explanation: "Site error",
+      manualLink: {
+        href: "https://www.asos.com/product/123",
+        label: "Open in ASOS to complete manually",
+      },
+      retailer: "ASOS",
+      status: "error",
+      type: "retailer_staging_failure_card",
+    },
+  );
 });
 
 test("creates a discovery-only Feed item for retailer circuit-breaker mode", () => {

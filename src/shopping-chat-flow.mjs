@@ -250,6 +250,7 @@ export function createProfileConfirmationCard(profileFact) {
 export async function stageSelectedAsketCandidates({
   selectedCandidates,
   page,
+  browserRun,
   auditLogPath,
   stageCartItem = stageAsketCartItem,
   refreshActiveCarts,
@@ -286,6 +287,8 @@ export async function stageSelectedAsketCandidates({
           stagedCount,
         });
       }
+    } else if (result?.status) {
+      await foregroundStagingFailurePage({ browserRun, page });
     }
   }
 
@@ -307,10 +310,20 @@ export async function stageSelectedAsketCandidates({
 }
 
 export function renderAsketStagingResultCard({
+  results = [],
   stagedCount,
   totalSelected,
   cartUrl = ASKET_CART_URL,
 } = {}) {
+  const failure = findFirstStagingFailure(results);
+  if (failure) {
+    return renderRetailerStagingFailureCard({
+      cartUrl,
+      failure,
+      retailer: ASKET_RETAILER,
+    });
+  }
+
   return {
     openCartLink: {
       href: normalizeUrl(cartUrl, "cartUrl"),
@@ -324,10 +337,20 @@ export function renderAsketStagingResultCard({
 }
 
 export function renderAsosStagingResultCard({
+  results = [],
   stagedCount,
   totalSelected,
   cartUrl = ASOS_CART_URL,
 } = {}) {
+  const failure = findFirstStagingFailure(results);
+  if (failure) {
+    return renderRetailerStagingFailureCard({
+      cartUrl,
+      failure,
+      retailer: ASOS_RETAILER,
+    });
+  }
+
   return {
     openCartLink: {
       href: normalizeUrl(cartUrl, "cartUrl"),
@@ -343,6 +366,7 @@ export function renderAsosStagingResultCard({
 export async function stageSelectedAsosCandidates({
   selectedCandidates,
   page,
+  browserRun,
   auditLogPath,
   stageCartItem = stageAsosCartItem,
   refreshActiveCarts,
@@ -363,6 +387,7 @@ export async function stageSelectedAsosCandidates({
     const result = await stageCartItem({
       auditLogPath,
       page,
+      browserRun,
       productId: candidate.productId,
       productUrl: candidate.productUrl,
       size: candidate.size,
@@ -379,6 +404,8 @@ export async function stageSelectedAsosCandidates({
           stagedCount,
         });
       }
+    } else if (result?.status) {
+      await foregroundStagingFailurePage({ browserRun, page });
     }
   }
 
@@ -413,6 +440,54 @@ export function createStagingFailedAtRetailerFeedItem(retailer) {
     retailer,
     title: `Staging failed at ${normalizeNonEmptyString(retailer, "retailer")}`,
   });
+}
+
+export function renderRetailerStagingFailureCard({
+  cartUrl,
+  failure,
+  retailer,
+} = {}) {
+  const normalizedRetailer = normalizeNonEmptyString(retailer, "retailer");
+  const failedResult = failure?.result && typeof failure.result === "object" ? failure.result : {};
+  const failedCandidate = failure?.candidate && typeof failure.candidate === "object" ? failure.candidate : {};
+  const manualUrl = failedResult.productUrl ?? failedCandidate.productUrl ?? cartUrl;
+
+  return {
+    explanation: createStagingFailureExplanation({
+      error: failedResult.error,
+      reason: failedResult.reason,
+      retailer: normalizedRetailer,
+      status: failedResult.status,
+    }),
+    manualLink: {
+      href: normalizeUrl(manualUrl, "manualUrl"),
+      label: `Open in ${normalizedRetailer} to complete manually`,
+    },
+    retailer: normalizedRetailer,
+    status: normalizeNonEmptyString(failedResult.status ?? "error", "failure status"),
+    type: "retailer_staging_failure_card",
+  };
+}
+
+export function createStagingFailureExplanation({
+  error,
+  reason,
+  retailer,
+  status,
+} = {}) {
+  const normalizedRetailer = normalizeNonEmptyString(retailer, "retailer");
+  const normalizedStatus = typeof status === "string" ? status.trim().toLowerCase() : "error";
+
+  if (normalizedStatus === "out_of_stock") {
+    return "Item out of stock";
+  }
+  if (normalizedStatus === "login_expired") {
+    return "Login expired";
+  }
+  if (isAntiBotFailure(`${reason ?? ""} ${error ?? ""}`)) {
+    return `Staging blocked by ${normalizedRetailer} - anti-bot challenge`;
+  }
+  return "Site error";
 }
 
 export function createDiscoveryOnlyRetailerFeedItem(retailer) {
@@ -833,6 +908,27 @@ function createStagingResultFeedItems(results, retailer) {
   }
 
   return feedItems;
+}
+
+function findFirstStagingFailure(results) {
+  if (!Array.isArray(results)) {
+    return undefined;
+  }
+  return results.find(({ result }) => result?.status && result.status !== "success");
+}
+
+async function foregroundStagingFailurePage({ browserRun, page } = {}) {
+  if (browserRun && typeof browserRun.foregroundCurrentPage === "function") {
+    await browserRun.foregroundCurrentPage();
+    return;
+  }
+  if (page && typeof page.bringToFront === "function") {
+    await page.bringToFront();
+  }
+}
+
+function isAntiBotFailure(message) {
+  return /\b(anti-?bot|bot|captcha|challenge|cloudflare|access denied|blocked)\b/i.test(String(message));
 }
 
 function createRetailerFeedItem({ event, retailer, title }) {

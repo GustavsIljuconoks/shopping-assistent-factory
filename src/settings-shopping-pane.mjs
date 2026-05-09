@@ -461,8 +461,13 @@ export function renderRetailerProposalCard(proposal) {
 function renderNormalizedRetailerProposalCard(proposal) {
   const selectedCount = countSelectedCandidates(proposal.candidates);
   const isStaged = proposal.staged;
-  const buttonDisabled = selectedCount === 0 || isStaged ? " disabled" : "";
+  const hasFailure = Boolean(proposal.failure);
+  const buttonDisabled = selectedCount === 0 || isStaged || hasFailure ? " disabled" : "";
   const selectedLabel = `${selectedCount} selected`;
+
+  if (hasFailure) {
+    return renderProposalFailureCard(proposal, selectedLabel, buttonDisabled);
+  }
 
   return [
     `    <article class="proposal-card${isStaged ? " proposal-card--staged" : ""}" aria-label="${escapeHtml(proposal.retailer)} proposal">`,
@@ -485,6 +490,28 @@ function renderNormalizedRetailerProposalCard(proposal) {
     "      </footer>",
     "    </article>",
   ].filter(Boolean).join("\n");
+}
+
+function renderProposalFailureCard(proposal, selectedLabel, buttonDisabled) {
+  return [
+    `    <article class="proposal-card proposal-card--failed" aria-label="${escapeHtml(proposal.retailer)} staging failure">`,
+    '      <header class="proposal-card-header">',
+    "        <div>",
+    `          <h3>${escapeHtml(proposal.retailer)}</h3>`,
+    `          <p>${escapeHtml(selectedLabel)}</p>`,
+    "        </div>",
+    `        <a class="proposal-cart-link" href="${escapeHtml(proposal.failure.manualUrl)}" target="_blank" rel="noreferrer">Open in ${escapeHtml(proposal.retailer)} to complete manually</a>`,
+    "      </header>",
+    '      <div class="proposal-failure-result" role="alert">',
+    `        <strong>${escapeHtml(proposal.failure.explanation)}</strong>`,
+    "      </div>",
+    '      <footer class="proposal-card-footer">',
+    `        <span>ETA: ${escapeHtml(proposal.eta)}</span>`,
+    `        <span>Returns: ${escapeHtml(proposal.returnPolicy)}</span>`,
+    `        <button type="button" class="proposal-stage-button"${buttonDisabled}>Stage selected to ${escapeHtml(proposal.retailer)} cart</button>`,
+    "      </footer>",
+    "    </article>",
+  ].join("\n");
 }
 
 function renderProposalCandidates(candidates) {
@@ -620,6 +647,7 @@ function normalizeProposalCard(proposal) {
     returnPolicy: normalizeString(proposal.returnPolicy, "proposal return policy"),
     cartUrl: normalizeString(proposal.cartUrl, "proposal cart URL"),
     candidates: candidatesWithSelection,
+    failure: normalizeProposalFailure(proposal),
     staged: normalizeStagedState(proposal),
     stagedCount:
       proposal.stagedCount === undefined ? undefined : normalizeNonNegativeInteger(proposal.stagedCount, "staged count"),
@@ -807,6 +835,47 @@ function normalizeStagedState(proposal) {
   }
 
   return ["staged", "success", "succeeded"].includes(proposal.stagingStatus.trim().toLowerCase());
+}
+
+function normalizeProposalFailure(proposal) {
+  const status = typeof proposal.stagingStatus === "string" ? proposal.stagingStatus.trim().toLowerCase() : "";
+  const failure =
+    proposal.failureCard ??
+    proposal.failure ??
+    (["failed", "failure", "error", "out_of_stock", "login_expired", "site_error", "anti_bot"].includes(status)
+      ? proposal
+      : undefined);
+
+  if (!failure || typeof failure !== "object" || Array.isArray(failure)) {
+    return undefined;
+  }
+
+  return {
+    explanation: normalizeString(
+      failure.explanation ??
+        createProposalFailureExplanation(failure.reason ?? failure.error ?? status, proposal.retailer ?? proposal.retailerName),
+      "failure explanation",
+    ),
+    manualUrl: normalizeString(
+      failure.manualUrl ?? failure.productUrl ?? proposal.productUrl ?? proposal.cartUrl,
+      "manual URL",
+    ),
+  };
+}
+
+function createProposalFailureExplanation(value, retailer) {
+  const text = String(value ?? "").trim().toLowerCase();
+  const retailerLabel = typeof retailer === "string" && retailer.trim() ? retailer.trim() : "retailer";
+  if (text === "out_of_stock" || text.includes("out of stock") || text.includes("sold out")) {
+    return "Item out of stock";
+  }
+  if (text === "login_expired" || text.includes("login") || text.includes("session")) {
+    return "Login expired";
+  }
+  if (text === "anti_bot" || /\b(anti-?bot|bot|captcha|challenge|cloudflare|blocked)\b/i.test(text)) {
+    return `Staging blocked by ${retailerLabel} - anti-bot challenge`;
+  }
+  return "Site error";
 }
 
 function normalizeNonNegativeInteger(value, field) {
