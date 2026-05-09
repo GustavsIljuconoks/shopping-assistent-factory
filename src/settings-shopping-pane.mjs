@@ -1,3 +1,9 @@
+import {
+  createDefaultShoppingProfile,
+  readShoppingProfile,
+  writeShoppingProfile,
+} from "./shopping-profile.mjs";
+
 export const SETTINGS_SECTIONS = Object.freeze([
   {
     id: "shopping",
@@ -18,8 +24,26 @@ export const SHOPPING_ACTIVITY_EMPTY_STATE =
 export const CONNECTED_RETAILERS_EMPTY_STATE =
   "No retailers are connected yet.";
 
+export const DEFAULT_GARMENT_CLASSES = Object.freeze([
+  "tops",
+  "bottoms",
+  "outerwear",
+  "shoes",
+  "underwear",
+  "accessories",
+]);
+
+export const DEFAULT_RETAILERS = Object.freeze([
+  "Asket",
+  "Zalando",
+  "ASOS",
+  "About You",
+  "Uniqlo",
+]);
+
 export function renderSettingsShoppingPane({ connectedRetailers = [], profile, proposalCards = [] } = {}) {
-  const profileState = profile ? "Profile data loaded." : "No shopping profile data yet.";
+  const normalizedProfile = createDefaultShoppingProfile(profile ?? {});
+  const profileState = profile ? "Profile data loaded." : "Using default shopping profile values.";
   const retailers = normalizeConnectedRetailers(connectedRetailers);
   const proposals = normalizeProposalCards(proposalCards);
   const connectedRetailersContent =
@@ -44,8 +68,8 @@ export function renderSettingsShoppingPane({ connectedRetailers = [], profile, p
     '<section id="shopping" class="settings-pane" aria-labelledby="shopping-heading">',
     '  <p class="settings-kicker">Settings</p>',
     '  <h1 id="shopping-heading">Shopping</h1>',
-    `  <p class="settings-placeholder">${escapeHtml(SHOPPING_SETUP_PLACEHOLDER)}</p>`,
     `  <p class="settings-status">${escapeHtml(profileState)}</p>`,
+    renderShoppingProfileEditor(normalizedProfile),
     '  <section class="settings-subpane" aria-labelledby="connected-retailers-heading">',
     '    <h2 id="connected-retailers-heading">Connected retailers</h2>',
     "    " + connectedRetailersContent,
@@ -53,6 +77,132 @@ export function renderSettingsShoppingPane({ connectedRetailers = [], profile, p
     proposalCardsContent,
     "</section>",
   ].filter(Boolean).join("\n");
+}
+
+export async function persistSettingsShoppingProfileChange(change = {}, { profilePath } = {}) {
+  if (!change || typeof change !== "object" || Array.isArray(change)) {
+    throw new TypeError("settings profile change must be an object.");
+  }
+
+  const profile = await readShoppingProfile(profilePath);
+  const next = {
+    ...profile,
+    sizes: { ...profile.sizes },
+    budgetAnchors: { ...profile.budgetAnchors },
+    hardExclusions: [...profile.hardExclusions],
+    enabledRetailers: [...profile.enabledRetailers],
+  };
+
+  switch (change.field) {
+    case "country":
+    case "currency":
+      next[change.field] = normalizeString(change.value, change.field);
+      break;
+    case "size":
+      applySizeChange(next, change);
+      break;
+    case "budgetAnchor":
+      applyBudgetAnchorChange(next, change);
+      break;
+    case "hardExclusions":
+      next.hardExclusions = normalizeSettingsList(change.value, "hardExclusions");
+      break;
+    case "perItemPriceCeiling":
+      next.perItemPriceCeiling = normalizeSettingsMoney(change.value, "perItemPriceCeiling");
+      break;
+    case "enabledRetailer":
+      applyEnabledRetailerChange(next, change);
+      break;
+    default:
+      throw new TypeError("settings profile change field is not supported.");
+  }
+
+  return writeShoppingProfile(next, profilePath);
+}
+
+function renderShoppingProfileEditor(profile) {
+  return [
+    '  <form class="shopping-profile-editor" data-shopping-profile-editor>',
+    '    <section class="settings-subpane" aria-labelledby="shopping-region-heading">',
+    '      <h2 id="shopping-region-heading">Shopping region</h2>',
+    '      <div class="settings-field-grid settings-field-grid--compact">',
+    renderTextField({
+      id: "shopping-country",
+      label: "Country",
+      name: "country",
+      value: profile.country,
+      maxLength: 2,
+      pattern: "[A-Za-z]{2}",
+      autocomplete: "country",
+    }),
+    renderTextField({
+      id: "shopping-currency",
+      label: "Currency",
+      name: "currency",
+      value: profile.currency,
+      maxLength: 3,
+      pattern: "[A-Za-z]{3}",
+    }),
+    "      </div>",
+    "    </section>",
+    '    <section class="settings-subpane" aria-labelledby="shopping-sizes-heading">',
+    '      <h2 id="shopping-sizes-heading">Sizes</h2>',
+    '      <div class="shopping-profile-table" role="table" aria-label="Garment sizes">',
+    '        <div class="shopping-profile-row shopping-profile-row--head" role="row">',
+    '          <span role="columnheader">Class</span>',
+    '          <span role="columnheader">Size</span>',
+    '          <span role="columnheader">System</span>',
+    '          <span role="columnheader">Notes</span>',
+    "        </div>",
+    ...getProfileKeys(profile.sizes).map((garmentClass) => renderSizeRow(garmentClass, profile.sizes[garmentClass])),
+    "      </div>",
+    "    </section>",
+    '    <section class="settings-subpane" aria-labelledby="shopping-budget-heading">',
+    '      <h2 id="shopping-budget-heading">Budget anchors</h2>',
+    '      <div class="shopping-profile-table" role="table" aria-label="Budget anchors by garment class">',
+    '        <div class="shopping-profile-row shopping-profile-row--head shopping-profile-row--budget" role="row">',
+    '          <span role="columnheader">Class</span>',
+    '          <span role="columnheader">Amount</span>',
+    '          <span role="columnheader">Currency</span>',
+    '          <span role="columnheader">Cadence</span>',
+    '          <span role="columnheader">Notes</span>',
+    "        </div>",
+    ...getProfileKeys(profile.budgetAnchors).map((garmentClass) =>
+      renderBudgetRow(garmentClass, profile.budgetAnchors[garmentClass], profile.currency),
+    ),
+    "      </div>",
+    "    </section>",
+    '    <section class="settings-subpane" aria-labelledby="shopping-limits-heading">',
+    '      <h2 id="shopping-limits-heading">Limits and exclusions</h2>',
+    '      <div class="settings-field-grid settings-field-grid--compact">',
+    renderNumberField({
+      id: "shopping-price-ceiling-amount",
+      label: "Per-item ceiling",
+      name: "perItemPriceCeiling.amount",
+      value: profile.perItemPriceCeiling.amount,
+    }),
+    renderTextField({
+      id: "shopping-price-ceiling-currency",
+      label: "Ceiling currency",
+      name: "perItemPriceCeiling.currency",
+      value: profile.perItemPriceCeiling.currency,
+      maxLength: 3,
+      pattern: "[A-Za-z]{3}",
+    }),
+    "      </div>",
+    '      <label class="settings-field settings-field--wide" for="shopping-hard-exclusions">',
+    "        <span>Hard exclusions</span>",
+    `        <textarea id="shopping-hard-exclusions" name="hardExclusions" rows="3" data-profile-field="hardExclusions">${escapeHtml(profile.hardExclusions.join("\n"))}</textarea>`,
+    "      </label>",
+    "    </section>",
+    '    <section class="settings-subpane" aria-labelledby="shopping-enabled-retailers-heading">',
+    '      <h2 id="shopping-enabled-retailers-heading">Enabled retailers</h2>',
+    '      <ul class="enabled-retailers-list">',
+    ...DEFAULT_RETAILERS.map((retailer) => renderRetailerToggle(retailer, profile.enabledRetailers.includes(retailer))),
+    "      </ul>",
+    "    </section>",
+    "  </form>",
+  ].join("\n");
 }
 
 export function renderSettingsPrivacyPane({ auditEntries = [] } = {}) {
@@ -99,6 +249,100 @@ export function renderSettingsApp({
         : renderSettingsPrivacyPane({ auditEntries }).replaceAll("\n", "\n  ")
     }`,
     "</main>",
+  ].join("\n");
+}
+
+function renderTextField({ id, label, name, value, maxLength, pattern, autocomplete }) {
+  const attributes = [
+    `id="${escapeHtml(id)}"`,
+    `name="${escapeHtml(name)}"`,
+    'type="text"',
+    `value="${escapeHtml(value)}"`,
+    `data-profile-field="${escapeHtml(name)}"`,
+    maxLength ? `maxlength="${escapeHtml(maxLength)}"` : "",
+    pattern ? `pattern="${escapeHtml(pattern)}"` : "",
+    autocomplete ? `autocomplete="${escapeHtml(autocomplete)}"` : "",
+  ].filter(Boolean).join(" ");
+
+  return [
+    `        <label class="settings-field" for="${escapeHtml(id)}">`,
+    `          <span>${escapeHtml(label)}</span>`,
+    `          <input ${attributes}>`,
+    "        </label>",
+  ].join("\n");
+}
+
+function renderNumberField({ id, label, name, value }) {
+  return [
+    `        <label class="settings-field" for="${escapeHtml(id)}">`,
+    `          <span>${escapeHtml(label)}</span>`,
+    `          <input id="${escapeHtml(id)}" name="${escapeHtml(name)}" type="number" min="0" step="0.01" value="${escapeHtml(value)}" data-profile-field="${escapeHtml(name)}">`,
+    "        </label>",
+  ].join("\n");
+}
+
+function renderSizeRow(garmentClass, size) {
+  const baseName = `sizes.${garmentClass}`;
+  return [
+    '        <div class="shopping-profile-row" role="row">',
+    `          <strong role="rowheader">${escapeHtml(formatGarmentClass(garmentClass))}</strong>`,
+    renderInlineInput(`${baseName}.value`, size?.value ?? "", "Size"),
+    renderInlineInput(`${baseName}.system`, size?.system ?? "", "System"),
+    renderInlineInput(`${baseName}.notes`, size?.notes ?? "", "Notes"),
+    "        </div>",
+  ].join("\n");
+}
+
+function renderBudgetRow(garmentClass, budgetAnchor, defaultCurrency) {
+  const baseName = `budgetAnchors.${garmentClass}`;
+  return [
+    '        <div class="shopping-profile-row shopping-profile-row--budget" role="row">',
+    `          <strong role="rowheader">${escapeHtml(formatGarmentClass(garmentClass))}</strong>`,
+    renderInlineInput(`${baseName}.amount`, budgetAnchor?.amount ?? 0, "Amount", "number"),
+    renderInlineInput(`${baseName}.currency`, budgetAnchor?.currency ?? defaultCurrency, "Currency"),
+    renderCadenceSelect(`${baseName}.cadence`, budgetAnchor?.cadence ?? "per_item"),
+    renderInlineInput(`${baseName}.notes`, budgetAnchor?.notes ?? "", "Notes"),
+    "        </div>",
+  ].join("\n");
+}
+
+function renderInlineInput(name, value, label, type = "text") {
+  const id = normalizeId(`shopping-${name}`);
+  const numericAttributes = type === "number" ? ' min="0" step="0.01"' : "";
+  return [
+    `          <label class="shopping-profile-inline-field" for="${escapeHtml(id)}">`,
+    `            <span>${escapeHtml(label)}</span>`,
+    `            <input id="${escapeHtml(id)}" name="${escapeHtml(name)}" type="${escapeHtml(type)}"${numericAttributes} value="${escapeHtml(value)}" data-profile-field="${escapeHtml(name)}">`,
+    "          </label>",
+  ].join("\n");
+}
+
+function renderCadenceSelect(name, value) {
+  const id = normalizeId(`shopping-${name}`);
+  const options = ["per_item", "monthly", "seasonal", "annual"];
+  return [
+    `          <label class="shopping-profile-inline-field" for="${escapeHtml(id)}">`,
+    "            <span>Cadence</span>",
+    `            <select id="${escapeHtml(id)}" name="${escapeHtml(name)}" data-profile-field="${escapeHtml(name)}">`,
+    ...options.map((option) => {
+      const selected = option === value ? " selected" : "";
+      return `              <option value="${escapeHtml(option)}"${selected}>${escapeHtml(option.replaceAll("_", " "))}</option>`;
+    }),
+    "            </select>",
+    "          </label>",
+  ].join("\n");
+}
+
+function renderRetailerToggle(retailer, enabled) {
+  const checked = enabled ? " checked" : "";
+  const id = normalizeId(`shopping-retailer-${retailer}`);
+  return [
+    '        <li class="enabled-retailer">',
+    `          <label for="${escapeHtml(id)}">`,
+    `            <input id="${escapeHtml(id)}" name="enabledRetailers" type="checkbox" value="${escapeHtml(retailer)}" data-profile-field="enabledRetailers" data-retailer="${escapeHtml(retailer)}"${checked}>`,
+    `            <span>${escapeHtml(retailer)}</span>`,
+    "          </label>",
+    "        </li>",
   ].join("\n");
 }
 
@@ -270,6 +514,146 @@ function normalizeProposalCandidates(candidates) {
       selected: Boolean(candidate.selected),
     };
   });
+}
+
+function applySizeChange(profile, change) {
+  const garmentClass = normalizeGarmentClass(change.garmentClass);
+  const size = normalizeSettingsSize(change.value);
+
+  if (!size) {
+    delete profile.sizes[garmentClass];
+    return;
+  }
+
+  profile.sizes[garmentClass] = size;
+}
+
+function applyBudgetAnchorChange(profile, change) {
+  const garmentClass = normalizeGarmentClass(change.garmentClass);
+  const budgetAnchor = normalizeSettingsBudgetAnchor(change.value);
+
+  if (!budgetAnchor) {
+    delete profile.budgetAnchors[garmentClass];
+    return;
+  }
+
+  profile.budgetAnchors[garmentClass] = budgetAnchor;
+}
+
+function applyEnabledRetailerChange(profile, change) {
+  const retailer = normalizeString(change.retailer ?? change.value, "retailer");
+  const enabled = Boolean(change.enabled);
+  const current = new Set(profile.enabledRetailers);
+
+  if (enabled) {
+    current.add(retailer);
+  } else {
+    current.delete(retailer);
+  }
+
+  profile.enabledRetailers = [...current];
+}
+
+function getProfileKeys(record) {
+  return [...new Set([...DEFAULT_GARMENT_CLASSES, ...Object.keys(record)])];
+}
+
+function formatGarmentClass(value) {
+  return value
+    .split(/[-_\s]+/g)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function normalizeGarmentClass(value) {
+  return normalizeString(value, "garmentClass");
+}
+
+function normalizeSettingsSize(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("size change value must be an object.");
+  }
+
+  const sizeValue = typeof value.value === "string" ? value.value.trim() : "";
+  const system = typeof value.system === "string" ? value.system.trim() : "";
+  const notes = typeof value.notes === "string" ? value.notes.trim() : "";
+
+  if (!sizeValue && !system && !notes) {
+    return undefined;
+  }
+  if (!sizeValue) {
+    throw new TypeError("size value is required when saving a garment size.");
+  }
+
+  return {
+    value: sizeValue,
+    ...(system ? { system } : {}),
+    ...(notes ? { notes } : {}),
+  };
+}
+
+function normalizeSettingsBudgetAnchor(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("budget anchor change value must be an object.");
+  }
+
+  const amount = normalizeOptionalAmount(value.amount);
+  const currency = typeof value.currency === "string" ? value.currency.trim() : "";
+  const cadence = typeof value.cadence === "string" ? value.cadence.trim() : "";
+  const notes = typeof value.notes === "string" ? value.notes.trim() : "";
+
+  if (amount === undefined && !currency && !cadence && !notes) {
+    return undefined;
+  }
+  if (amount === undefined) {
+    throw new TypeError("budget anchor amount is required when saving a budget anchor.");
+  }
+
+  return {
+    amount,
+    ...(currency ? { currency } : {}),
+    ...(cadence ? { cadence } : {}),
+    ...(notes ? { notes } : {}),
+  };
+}
+
+function normalizeSettingsMoney(value, field) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`${field} change value must be an object.`);
+  }
+
+  const amount = normalizeOptionalAmount(value.amount);
+  if (amount === undefined) {
+    throw new TypeError(`${field}.amount must be provided.`);
+  }
+
+  return {
+    amount,
+    ...(value.currency === undefined ? {} : { currency: normalizeString(value.currency, `${field}.currency`) }),
+  };
+}
+
+function normalizeOptionalAmount(value) {
+  if (value === "" || value === null || value === undefined) {
+    return undefined;
+  }
+  const amount = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(amount) || amount < 0) {
+    throw new TypeError("amount must be a non-negative finite number.");
+  }
+  return amount;
+}
+
+function normalizeSettingsList(value, field) {
+  const entries = Array.isArray(value) ? value : String(value ?? "").split(/[\n,]/g);
+
+  return [...new Set(entries.map((item) => {
+    if (typeof item !== "string") {
+      throw new TypeError(`${field} entries must be strings.`);
+    }
+    return item.trim();
+  }).filter(Boolean))];
 }
 
 function countSelectedCandidates(candidates) {

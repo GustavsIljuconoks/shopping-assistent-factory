@@ -1,15 +1,24 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 import {
   CONNECTED_RETAILERS_EMPTY_STATE,
+  DEFAULT_RETAILERS,
   SHOPPING_ACTIVITY_EMPTY_STATE,
-  SHOPPING_SETUP_PLACEHOLDER,
+  persistSettingsShoppingProfileChange,
   renderRetailerProposalCard,
   renderSettingsApp,
   renderSettingsPrivacyPane,
   renderSettingsShoppingPane,
 } from "../src/settings-shopping-pane.mjs";
+import {
+  createDefaultShoppingProfile,
+  readShoppingProfile,
+  writeShoppingProfile,
+} from "../src/shopping-profile.mjs";
 
 test("renders a navigable Settings Privacy shopping activity section", () => {
   const html = renderSettingsApp();
@@ -38,30 +47,55 @@ test("can still render the Settings Shopping section", () => {
 
   assert.match(html, /aria-current="page">Shopping<\/a>/);
   assert.match(html, /<section id="shopping"/);
-  assert.match(html, new RegExp(SHOPPING_SETUP_PLACEHOLDER));
+  assert.match(html, /Shopping region/);
+  assert.match(html, /Enabled retailers/);
   assert.match(html, /Connected retailers/);
   assert.match(html, new RegExp(CONNECTED_RETAILERS_EMPTY_STATE));
 });
 
-test("renders the Shopping pane without profile data", () => {
+test("renders the Shopping pane with editable default profile data", () => {
   assert.doesNotThrow(() => renderSettingsShoppingPane());
 
   const html = renderSettingsShoppingPane();
 
   assert.match(html, /Shopping/);
-  assert.match(html, /No shopping profile data yet\./);
+  assert.match(html, /Using default shopping profile values\./);
+  assert.match(html, /name="country" type="text" value="LV"/);
+  assert.match(html, /name="currency" type="text" value="EUR"/);
+  assert.match(html, /name="sizes\.tops\.value"/);
+  assert.match(html, /name="budgetAnchors\.tops\.amount"/);
+  assert.match(html, /name="perItemPriceCeiling\.amount" type="number"/);
+  assert.match(html, /name="hardExclusions"/);
+  assert.equal((html.match(/name="enabledRetailers"/g) ?? []).length, DEFAULT_RETAILERS.length);
 });
 
-test("accepts present profile data without changing the empty setup shell", () => {
+test("renders present shopping profile fields as editable in-place controls", () => {
   const html = renderSettingsShoppingPane({
     profile: {
       country: "LV",
       currency: "EUR",
+      sizes: {
+        tops: { value: "M", system: "International", notes: "Regular fit" },
+      },
+      budgetAnchors: {
+        tops: { amount: 80, currency: "EUR", cadence: "seasonal", notes: "Prefer sale" },
+      },
+      hardExclusions: ["leather", "dry clean only"],
+      perItemPriceCeiling: { amount: 150, currency: "EUR" },
+      enabledRetailers: ["Asket", "ASOS"],
     },
   });
 
   assert.match(html, /Profile data loaded\./);
-  assert.match(html, new RegExp(SHOPPING_SETUP_PLACEHOLDER));
+  assert.match(html, /value="M"/);
+  assert.match(html, /value="International"/);
+  assert.match(html, /Regular fit/);
+  assert.match(html, /value="80"/);
+  assert.match(html, /Prefer sale/);
+  assert.match(html, /leather\n?dry clean only/);
+  assert.match(html, /value="150"/);
+  assert.match(html, /value="Asket"[^>]+checked/);
+  assert.match(html, /value="ASOS"[^>]+checked/);
 });
 
 test("renders connected retailer status in the Shopping pane", () => {
@@ -77,6 +111,64 @@ test("renders connected retailer status in the Shopping pane", () => {
   assert.match(html, /Connected retailers/);
   assert.match(html, /<span class="connected-retailer-name">Asket<\/span>/);
   assert.match(html, /<span class="connected-retailer-status">Connected<\/span>/);
+});
+
+test("persists individual Settings Shopping changes immediately", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "settings-shopping-pane-"));
+  const path = join(dir, "profile.json");
+
+  try {
+    await writeShoppingProfile(createDefaultShoppingProfile(), path);
+
+    await persistSettingsShoppingProfileChange({ field: "country", value: "de" }, { profilePath: path });
+    await persistSettingsShoppingProfileChange(
+      {
+        field: "size",
+        garmentClass: "tops",
+        value: { value: "L", system: "International", notes: "Relaxed fit" },
+      },
+      { profilePath: path },
+    );
+    await persistSettingsShoppingProfileChange(
+      {
+        field: "budgetAnchor",
+        garmentClass: "tops",
+        value: { amount: "95", currency: "EUR", cadence: "seasonal" },
+      },
+      { profilePath: path },
+    );
+    await persistSettingsShoppingProfileChange(
+      { field: "hardExclusions", value: "leather\npolyester, dry clean only" },
+      { profilePath: path },
+    );
+    await persistSettingsShoppingProfileChange(
+      { field: "perItemPriceCeiling", value: { amount: "180", currency: "EUR" } },
+      { profilePath: path },
+    );
+    await persistSettingsShoppingProfileChange(
+      { field: "enabledRetailer", retailer: "Asket", enabled: true },
+      { profilePath: path },
+    );
+
+    const profile = await readShoppingProfile(path);
+
+    assert.equal(profile.country, "DE");
+    assert.deepEqual(profile.sizes.tops, {
+      value: "L",
+      system: "International",
+      notes: "Relaxed fit",
+    });
+    assert.deepEqual(profile.budgetAnchors.tops, {
+      amount: 95,
+      currency: "EUR",
+      cadence: "seasonal",
+    });
+    assert.deepEqual(profile.hardExclusions, ["leather", "polyester", "dry clean only"]);
+    assert.deepEqual(profile.perItemPriceCeiling, { amount: 180, currency: "EUR" });
+    assert.deepEqual(profile.enabledRetailers, ["Asket"]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("renders per-retailer proposal cards with top candidate pre-selected", () => {
