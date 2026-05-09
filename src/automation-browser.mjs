@@ -148,6 +148,47 @@ async function publishWaiting(chat, payload) {
   }
 }
 
+export async function notifyIfBrowserChallengeVisible({
+  browserRun,
+  session,
+  reason = "cloudflare",
+} = {}) {
+  if (!browserRun || typeof browserRun.waitForUserAction !== "function") {
+    return false;
+  }
+  if (!(await detectBrowserChallengeInSession(session))) {
+    return false;
+  }
+  await browserRun.waitForUserAction({ reason });
+  return true;
+}
+
+async function detectBrowserChallengeInSession(session) {
+  if (!session || typeof session.evaluate !== "function") {
+    return false;
+  }
+
+  try {
+    return await session.evaluate(() => {
+      const title = (document.title || "").toLowerCase();
+      if (title.includes("just a moment") || title.includes("attention required")) {
+        return true;
+      }
+      if (
+        document.querySelector(
+          "#challenge-running, #cf-challenge-running, .cf-browser-verification, #challenge-body-text",
+        )
+      ) {
+        return true;
+      }
+      const host = (window.location?.hostname || "").toLowerCase();
+      return host.includes("challenges.cloudflare.com");
+    });
+  } catch {
+    return false;
+  }
+}
+
 function normalizeRetailer(retailer) {
   if (typeof retailer !== "string" || !retailer.trim()) {
     throw new TypeError("retailer must be a non-empty string.");

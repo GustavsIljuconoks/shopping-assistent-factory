@@ -3,13 +3,16 @@ import assert from "node:assert/strict";
 
 import {
   ASKET_CART_URL,
+  ASOS_CART_URL,
   SHOPPING_CHAT_LOW_CONFIDENCE_MESSAGE,
   createProfileConfirmationCard,
   detectShoppingIntent,
   findMissingBootstrapField,
   handleShoppingChatMessage,
   renderAsketStagingResultCard,
+  renderAsosStagingResultCard,
   stageSelectedAsketCandidates,
+  stageSelectedAsosCandidates,
 } from "../src/shopping-chat-flow.mjs";
 
 test("detects shopping intent in a garment request", () => {
@@ -399,6 +402,94 @@ test("returns an Asket result card for zero selected candidates without staging"
     stagedCount: 0,
     totalSelected: 0,
     type: "asket_staging_result_card",
+  });
+});
+
+test("stages selected ASOS candidates in sequence and refreshes active carts after each success", async () => {
+  const calls = [];
+  const activeCartUpdates = [];
+
+  const result = await stageSelectedAsosCandidates({
+    auditLogPath: "audit.jsonl",
+    page: { name: "playwright-page" },
+    selectedCandidates: [
+      {
+        id: "first",
+        productUrl: "https://www.asos.com/asos-design/product/prd/123",
+        size: "M",
+        title: "ASOS Tee",
+      },
+      {
+        id: "second",
+        productId: "asos/prd/456",
+        size: "L",
+        title: "ASOS Shirt",
+      },
+    ],
+    async stageCartItem(payload) {
+      calls.push(payload);
+      return {
+        productUrl:
+          payload.productUrl ?? `https://www.asos.com/${payload.productId.replace(/^\/+/, "")}`,
+        retailer: "ASOS",
+        size: payload.size,
+        status: "success",
+      };
+    },
+    async refreshActiveCarts(payload) {
+      activeCartUpdates.push(payload);
+      return [{ itemCount: payload.stagedCount, retailer: payload.retailer }];
+    },
+  });
+
+  assert.deepEqual(
+    calls.map((call) => [call.productUrl, call.productId, call.size, call.auditLogPath]),
+    [
+      ["https://www.asos.com/asos-design/product/prd/123", undefined, "M", "audit.jsonl"],
+      [undefined, "asos/prd/456", "L", "audit.jsonl"],
+    ],
+  );
+  assert.deepEqual(
+    activeCartUpdates.map((update) => [update.retailer, update.stagedCount, update.cartUrl]),
+    [
+      ["ASOS", 1, ASOS_CART_URL],
+      ["ASOS", 2, ASOS_CART_URL],
+    ],
+  );
+  assert.equal(result.action, "asos_staging_result");
+  assert.equal(result.stagedCount, 2);
+  assert.deepEqual(result.resultCard, {
+    openCartLink: {
+      href: ASOS_CART_URL,
+      label: "Open cart on ASOS",
+    },
+    retailer: "ASOS",
+    stagedCount: 2,
+    totalSelected: 2,
+    type: "asos_staging_result_card",
+  });
+});
+
+test("returns an ASOS result card for zero selected candidates without staging", async () => {
+  let touchedCart = false;
+
+  const result = await stageSelectedAsosCandidates({
+    selectedCandidates: [],
+    async stageCartItem() {
+      touchedCart = true;
+    },
+  });
+
+  assert.equal(touchedCart, false);
+  assert.deepEqual(renderAsosStagingResultCard({ stagedCount: 0, totalSelected: 0 }), {
+    openCartLink: {
+      href: ASOS_CART_URL,
+      label: "Open cart on ASOS",
+    },
+    retailer: "ASOS",
+    stagedCount: 0,
+    totalSelected: 0,
+    type: "asos_staging_result_card",
   });
 });
 

@@ -108,6 +108,21 @@ test("uses the default Zalando.lv cart URL when recording staged items", () => {
   });
 });
 
+test("uses the default ASOS basket URL when recording staged items", () => {
+  const activeCarts = new Map();
+  const row = recordStagedCartItem(activeCarts, {
+    retailer: "ASOS",
+    stagedAt: "2026-05-09T13:11:00.000Z",
+  });
+
+  assert.deepEqual(row, {
+    cartUrl: "https://www.asos.com/basket/",
+    itemCount: 1,
+    lastStagedAt: "2026-05-09T13:11:00.000Z",
+    retailer: "ASOS",
+  });
+});
+
 test("publishes and clears the chat strip as active carts appear and disappear", async () => {
   const events = [];
   const chat = {
