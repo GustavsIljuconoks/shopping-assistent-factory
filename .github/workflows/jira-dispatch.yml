@@ -168,7 +168,7 @@ jobs:
           GITHUB_WORKSPACE: ${{ github.workspace }}
           PROMPT_FILE: ${{ env.PROMPT_FILE }}
           RUN_DIR: ${{ env.RUN_DIR }}
-        run: node .github/scripts/codex-runner.mjs
+        run: node "${{ github.workspace }}/.github/scripts/codex-runner.mjs"
 
       - name: Run Cursor agent
         if: steps.ticket-context.outputs.should_run == 'true' && steps.resolve-agent-backend.outputs.agent_backend == 'cursor'
@@ -180,7 +180,7 @@ jobs:
           CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
         shell: bash
         run: |
-          node .github/scripts/cursor-runner.mjs || true
+          node "${{ github.workspace }}/.github/scripts/cursor-runner.mjs" || true
 
       - name: Run Gemini CLI
         if: steps.ticket-context.outputs.should_run == 'true' && steps.resolve-agent-backend.outputs.agent_backend == 'gemini'
@@ -193,7 +193,7 @@ jobs:
           GOOGLE_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         shell: bash
         run: |
-          node .github/scripts/gemini-runner.mjs || true
+          node "${{ github.workspace }}/.github/scripts/gemini-runner.mjs" || true
 
       - name: Record run outputs
         id: record-run

@@ -248,6 +248,15 @@ async function prepareDispatch() {
       console.log(`Existing branch ${branchName} found on origin; checking out.`);
       execSync(`git fetch origin ${JSON.stringify(branchName)}`, { stdio: "inherit" });
       execSync(`git checkout -B ${JSON.stringify(branchName)} origin/${branchName}`, { stdio: "inherit" });
+      // Older ticket branches often lack new CI scripts (codex-runner, etc.). Take
+      // .github/scripts from main so the workflow can spawn agents without MODULE_NOT_FOUND.
+      try {
+        execSync("git fetch origin main", { stdio: "inherit" });
+        execSync("git checkout origin/main -- .github/scripts", { stdio: "inherit" });
+        console.log("Synced .github/scripts from origin/main into this branch for CI.");
+      } catch (err) {
+        console.warn(`Could not sync .github/scripts from origin/main: ${err?.message ?? err}`);
+      }
     } else {
       console.log(`No existing branch ${branchName}; will create from main on commit.`);
     }
