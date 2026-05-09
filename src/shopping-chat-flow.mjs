@@ -155,7 +155,17 @@ export async function handleShoppingChatMessage({
     priceCeiling,
     size,
   };
-  const searchResult = await searchTool.search(searchContext);
+  const enabledRetailers = normalizeEnabledRetailers(profile?.enabledRetailers);
+  const searchResult =
+    enabledRetailers.length === 0
+      ? await searchTool.search(searchContext)
+      : await searchEnabledRetailersInParallel({
+          context: searchContext,
+          enabledRetailers,
+          renderProposalCard,
+          searchTool,
+          chat,
+        });
   const confidence = normalizeConfidence(searchResult?.confidence);
 
   if (confidence < minProposalConfidence) {
@@ -338,6 +348,80 @@ export function renderAsosStagingResultCard({
     totalSelected: normalizeNonNegativeInteger(totalSelected, "totalSelected"),
     type: "asos_staging_result_card",
   };
+}
+
+export async function searchEnabledRetailersInParallel({
+  context,
+  enabledRetailers,
+  searchTool,
+  renderProposalCard,
+  chat,
+} = {}) {
+  const retailers = normalizeEnabledRetailers(enabledRetailers);
+  if (retailers.length === 0) {
+    return {
+      cards: [],
+      confidence: 0,
+      retailerResults: [],
+      type: "multi_retailer_proposal",
+    };
+  }
+  if (!context || typeof context !== "object" || Array.isArray(context)) {
+    throw new TypeError("search context must be an object.");
+  }
+  if (!searchTool || typeof searchTool.search !== "function") {
+    throw new TypeError("searchTool.search must be a function.");
+  }
+
+  const retailerResults = await Promise.all(
+    retailers.map(async (retailer, index) => {
+      const result = await searchTool.search({
+        ...context,
+        retailer,
+        retailerIdentifier: retailer,
+      });
+      const normalized = normalizeRetailerSearchResult(result, retailer, index);
+      if (normalized.candidates.length > 0) {
+        await publishIncrementalProposalCard({
+          chat,
+          context,
+          renderProposalCard,
+          retailerResult: normalized,
+        });
+      }
+      return normalized;
+    }),
+  );
+
+  const cards = assembleMultiRetailerProposal(retailerResults);
+
+  return {
+    cards,
+    confidence: cards.length === 0 ? 0 : Math.max(...cards.map((card) => card.confidence)),
+    retailerResults,
+    type: "multi_retailer_proposal",
+  };
+}
+
+export function assembleMultiRetailerProposal(retailerResults, { maxCandidatesPerRetailer = 3 } = {}) {
+  if (!Array.isArray(retailerResults)) {
+    throw new TypeError("retailerResults must be an array.");
+  }
+  const candidateLimit = normalizePositiveInteger(maxCandidatesPerRetailer, "maxCandidatesPerRetailer");
+
+  return retailerResults
+    .map((result, index) => normalizeRetailerSearchResult(result, result?.retailer, index))
+    .filter((result) => result.candidates.length > 0)
+    .map((result) => ({
+      ...result,
+      candidates: result.candidates.slice(0, candidateLimit),
+    }))
+    .sort(
+      (left, right) =>
+        right.overallMatchScore - left.overallMatchScore ||
+        right.confidence - left.confidence ||
+        left.index - right.index,
+    );
 }
 
 export async function stageSelectedAsosCandidates({
@@ -816,6 +900,22 @@ async function publishPlainText(chat, message, payload) {
   }
 }
 
+async function publishIncrementalProposalCard({ chat, context, renderProposalCard, retailerResult }) {
+  if (!chat || typeof chat.showProposalCard !== "function" || typeof renderProposalCard !== "function") {
+    return;
+  }
+
+  const proposalCard = await renderProposalCard(retailerResult, {
+    ...context,
+    retailer: retailerResult.retailer,
+    retailerIdentifier: retailerResult.retailer,
+  });
+  await chat.showProposalCard(proposalCard, {
+    context,
+    retailerResult,
+  });
+}
+
 function createStagingResultFeedItems(results, retailer) {
   if (!Array.isArray(results) || results.length === 0) {
     return [];
@@ -863,6 +963,66 @@ function normalizeConfidence(value) {
     return 0;
   }
   return Math.max(0, Math.min(1, value));
+}
+
+function normalizeEnabledRetailers(enabledRetailers) {
+  if (enabledRetailers === undefined) {
+    return [];
+  }
+  if (!Array.isArray(enabledRetailers)) {
+    throw new TypeError("enabledRetailers must be an array.");
+  }
+
+  return [...new Set(enabledRetailers.map((retailer) => normalizeNonEmptyString(retailer, "enabledRetailer")))];
+}
+
+function normalizeRetailerSearchResult(result, fallbackRetailer, index = 0) {
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    throw new TypeError("retailer search result must be an object.");
+  }
+
+  const retailer = normalizeNonEmptyString(
+    result.retailer ?? result.retailerName ?? result.retailerIdentifier ?? fallbackRetailer,
+    "retailer",
+  );
+  const candidates = normalizeRetailerCandidates(result.candidates ?? result.items ?? []);
+  const confidence = normalizeConfidence(result.confidence ?? (candidates.length > 0 ? 1 : 0));
+  const overallMatchScore = normalizeRetailerScore(
+    result.overallMatchScore ?? result.matchScore ?? result.score,
+    candidates,
+    confidence,
+  );
+
+  return {
+    ...result,
+    candidates,
+    confidence,
+    index: normalizeNonNegativeInteger(index, "retailer result index"),
+    overallMatchScore,
+    retailer,
+  };
+}
+
+function normalizeRetailerCandidates(candidates) {
+  if (!Array.isArray(candidates)) {
+    throw new TypeError("retailer search candidates must be an array.");
+  }
+  return candidates.slice(0, 3);
+}
+
+function normalizeRetailerScore(value, candidates, confidence) {
+  const score = Number(value ?? candidates[0]?.overallMatchScore ?? candidates[0]?.matchScore ?? candidates[0]?.score);
+  if (Number.isFinite(score)) {
+    return score;
+  }
+  return confidence;
+}
+
+function normalizePositiveInteger(value, field) {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new TypeError(`${field} must be a positive integer.`);
+  }
+  return value;
 }
 
 function normalizeCurrency(value) {
