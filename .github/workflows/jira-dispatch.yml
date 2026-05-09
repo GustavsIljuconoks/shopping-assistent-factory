@@ -1,13 +1,35 @@
 name: Handle Jira Manual Trigger
 
+# Which agent runs is chosen in this order:
+# 1) repository_dispatch client_payload.agent_backend (Jira automation can send it)
+# 2) workflow_dispatch input agent_backend (manual "Run workflow" in GitHub)
+# 3) Repository variable TDF_AGENT_BACKEND (Settings → Variables → Actions)
+# 4) claude
+#
+# Required secrets per backend:
+#   claude  → CLAUDE_CODE_OAUTH_TOKEN (anthropics/claude-code-base-action)
+#   codex   → runner must have `codex` on PATH + Codex auth on that runner
+#   cursor  → CURSOR_API_KEY (Cursor Dashboard → Integrations)
+#   gemini  → GEMINI_API_KEY (or set GOOGLE_API_KEY to the same value)
+
 on:
   repository_dispatch:
     types: [jira_manual_button]
   workflow_dispatch:
     inputs:
       issue_key:
-        description: "Jira issue key (e.g., TDS-7) for manual run"
+        description: "Jira issue key (e.g., KAN-3) for manual run"
         required: true
+      agent_backend:
+        description: "Coding agent to run for this ticket"
+        type: choice
+        required: true
+        default: claude
+        options:
+          - claude
+          - codex
+          - cursor
+          - gemini
 
 permissions:
   contents: write
@@ -37,6 +59,20 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+      - name: Resolve agent backend
+        shell: bash
+        run: |
+          raw="${AGENT_BACKEND_RAW}"
+          b=$(echo "$raw" | tr '[:upper:]' '[:lower:]')
+          case "$b" in
+            claude|codex|cursor|gemini) ;;
+            *) b="claude" ;;
+          esac
+          echo "AGENT_BACKEND=$b" >> "$GITHUB_ENV"
+          echo "Using agent backend: $b (raw input: ${raw})"
+        env:
+          AGENT_BACKEND_RAW: ${{ github.event.client_payload.agent_backend || github.event.inputs.agent_backend || vars.TDF_AGENT_BACKEND || 'claude' }}
+
       - name: Prepare ticket context
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
@@ -46,30 +82,95 @@ jobs:
           JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
         run: node .github/scripts/jira-dispatch.mjs prepare-dispatch
 
-      - name: Install dependencies
-        if: env.SHOULD_RUN == 'true'
-        run: npm install
+      - name: Restore Claude session cache
+        if: env.SHOULD_RUN == 'true' && env.AGENT_BACKEND == 'claude'
+        id: cache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.claude/projects
+          key: tdf-claude-${{ env.ISSUE_KEY }}-${{ github.run_id }}
+          restore-keys: |
+            tdf-claude-${{ env.ISSUE_KEY }}-
 
-      - name: Run Cursor Agent
-        if: env.SHOULD_RUN == 'true'
-        id: cursor
+      - name: Show cache restore result
+        if: env.SHOULD_RUN == 'true' && env.AGENT_BACKEND == 'claude'
+        run: |
+          echo "cache-hit: ${{ steps.cache-restore.outputs.cache-hit }}"
+          echo "matched-key: ${{ steps.cache-restore.outputs.cache-matched-key }}"
+          ls -la "$HOME/.claude/projects" || true
+
+      - name: Run Claude Code
+        if: env.SHOULD_RUN == 'true' && env.AGENT_BACKEND == 'claude'
+        id: claude
+        uses: anthropics/claude-code-base-action@main
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          settings: |
+            { "model": "opus", "effortLevel": "high" }
+          prompt_file: ${{ env.PROMPT_FILE }}
+          claude_args: ${{ env.CLAUDE_ARGS }}
+
+      - name: Export Claude outputs for record-run
+        if: env.SHOULD_RUN == 'true' && env.AGENT_BACKEND == 'claude'
+        run: |
+          echo "CONCLUSION=${{ steps.claude.outputs.conclusion }}" >> "$GITHUB_ENV"
+          echo "EXECUTION_FILE=${{ steps.claude.outputs.execution_file }}" >> "$GITHUB_ENV"
+          echo "ACTION_SESSION_ID=${{ steps.claude.outputs.session_id }}" >> "$GITHUB_ENV"
+
+      - name: Install agent runner dependencies (Cursor + Gemini)
+        if: env.SHOULD_RUN == 'true' && (env.AGENT_BACKEND == 'cursor' || env.AGENT_BACKEND == 'gemini')
+        working-directory: .github/scripts
+        run: npm ci
+
+      - name: Run Codex
+        if: env.SHOULD_RUN == 'true' && env.AGENT_BACKEND == 'codex'
         env:
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+          PROMPT_FILE: ${{ env.PROMPT_FILE }}
+          RUN_DIR: ${{ env.RUN_DIR }}
+        run: node .github/scripts/codex-runner.mjs
+
+      - name: Run Cursor agent
+        if: env.SHOULD_RUN == 'true' && env.AGENT_BACKEND == 'cursor'
+        env:
+          NODE_PATH: ${{ github.workspace }}/.github/scripts/node_modules
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+          PROMPT_FILE: ${{ env.PROMPT_FILE }}
+          RUN_DIR: ${{ env.RUN_DIR }}
           CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
         shell: bash
         run: |
           node .github/scripts/cursor-runner.mjs || true
-          # cursor-runner.mjs writes CONCLUSION, EXECUTION_FILE, LAST_MESSAGE_FILE
-          # to $GITHUB_ENV itself; exit 0 so downstream steps always run.
+
+      - name: Run Gemini CLI
+        if: env.SHOULD_RUN == 'true' && env.AGENT_BACKEND == 'gemini'
+        env:
+          NODE_PATH: ${{ github.workspace }}/.github/scripts/node_modules
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+          PROMPT_FILE: ${{ env.PROMPT_FILE }}
+          RUN_DIR: ${{ env.RUN_DIR }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        shell: bash
+        run: |
+          node .github/scripts/gemini-runner.mjs || true
 
       - name: Record run outputs
         if: env.SHOULD_RUN == 'true'
         env:
           GITHUB_RUN_ID: ${{ github.run_id }}
-          ACTION_SESSION_ID: ""
+          ACTION_SESSION_ID: ${{ env.ACTION_SESSION_ID }}
           CONCLUSION: ${{ env.CONCLUSION }}
           EXECUTION_FILE: ${{ env.EXECUTION_FILE }}
           LAST_MESSAGE_FILE: ${{ env.LAST_MESSAGE_FILE }}
         run: node .github/scripts/jira-dispatch.mjs record-run
+
+      - name: Save Claude session cache
+        if: env.SHOULD_RUN == 'true' && env.AGENT_BACKEND == 'claude' && env.NEW_SESSION_ID != ''
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.claude/projects
+          key: tdf-claude-${{ env.ISSUE_KEY }}-${{ github.run_id }}
 
       - name: Commit changes
         if: env.SHOULD_RUN == 'true'
@@ -93,12 +194,12 @@ jobs:
           JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
         run: node .github/scripts/jira-dispatch.mjs comment-result
 
-      - name: Final status
+      - name: Fail workflow if agent did not succeed
         if: env.SHOULD_RUN == 'true'
         shell: bash
         run: |
           if [ "${CONCLUSION:-failure}" != "success" ]; then
-            echo "Cursor agent run concluded as ${CONCLUSION:-failure}; failing the workflow."
+            echo "Agent backend ${AGENT_BACKEND:-unknown} concluded as ${CONCLUSION:-failure}."
             exit 1
           fi
-          echo "Cursor agent run succeeded."
+          echo "Agent run succeeded."

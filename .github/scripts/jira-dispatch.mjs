@@ -303,7 +303,10 @@ async function prepareDispatch() {
     PROMPT_FILE: promptFile,
   });
 
-  console.log(`Prepared dispatch for ${key} (kind=${kind} new=${isNew} last_session=${lastSessionId || "<none>"})`);
+  const agentLabel = (env.AGENT_BACKEND || "claude").toLowerCase();
+  console.log(
+    `Prepared dispatch for ${key} (kind=${kind} new=${isNew} last_session=${lastSessionId || "<none>"} agent=${agentLabel})`,
+  );
 }
 
 async function recordRun() {
@@ -393,6 +396,7 @@ async function recordRun() {
   const block = [
     "",
     `## Run ${now}`,
+    `- agent_backend: ${env.AGENT_BACKEND || "claude"}`,
     `- run_kind: ${isNew ? "new" : "continuation"}`,
     `- prev_session_id: ${lastSessionId || "<none>"}`,
     `- new_session_id: ${newSessionId || "<none>"}`,

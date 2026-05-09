@@ -222,3 +222,6 @@ data/shopping-profile.json
 
 # Runtime retailer browser profiles
 data/browser-profiles/
+
+# Node dependencies (installed via npm ci in CI / locally)
+node_modules/

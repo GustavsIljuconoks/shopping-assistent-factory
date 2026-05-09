@@ -1,0 +1,9 @@
+{
+  "name": "tdf-agent-runners",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@cursor/sdk": "^1.0.12",
+    "@google/gemini-cli": "^0.41.2"
+  }
+}
