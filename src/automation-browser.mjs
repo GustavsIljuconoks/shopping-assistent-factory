@@ -1,8 +1,13 @@
+export const AUTOMATION_BROWSER_DEFAULT_CHALLENGE_TIMEOUT_MS = 5 * 60 * 1000;
 export const AUTOMATION_BROWSER_WAITING_MESSAGE = "Waiting…";
 export const AUTOMATION_BROWSER_TITLE_PREFIX = "Bestfriend";
 
 export function createAutomationBrowserTitle(retailer) {
   return `${AUTOMATION_BROWSER_TITLE_PREFIX} · ${normalizeRetailer(retailer)}`;
+}
+
+export function createAutomationBrowserWaitingMessage(retailer) {
+  return `Waiting for you to confirm in ${normalizeRetailer(retailer)} window…`;
 }
 
 export class VisibleAutomationBrowserRun {
@@ -53,21 +58,48 @@ export class VisibleAutomationBrowserRun {
     };
   }
 
-  async waitForUserAction({ reason = "challenge" } = {}) {
+  async waitForUserAction({
+    hasUserReturnedFocus,
+    isResolved,
+    pollIntervalMs = 1000,
+    reason = "challenge",
+    timeoutMs = AUTOMATION_BROWSER_DEFAULT_CHALLENGE_TIMEOUT_MS,
+  } = {}) {
     const run = this.requireCurrentRun();
     run.userActionNeeded = true;
+    const message = createAutomationBrowserWaitingMessage(run.retailer);
 
     await publishWaiting(this.chat, {
-      message: AUTOMATION_BROWSER_WAITING_MESSAGE,
+      message,
       reason,
       retailer: run.retailer,
       session: run.session,
     });
 
-    return {
-      message: AUTOMATION_BROWSER_WAITING_MESSAGE,
+    if (typeof isResolved !== "function") {
+      return {
+        message,
+        reason,
+        status: "waiting",
+      };
+    }
+
+    await waitForUserActionResolution({
+      hasUserReturnedFocus,
+      isResolved,
+      pollIntervalMs,
       reason,
-      status: "waiting",
+      retailer: run.retailer,
+      session: run.session,
+      timeoutMs,
+      windowManager: this.windowManager,
+    });
+
+    run.userActionNeeded = false;
+    return {
+      message,
+      reason,
+      status: "resumed",
     };
   }
 
@@ -88,7 +120,7 @@ export class VisibleAutomationBrowserRun {
 
     if (run.userActionNeeded) {
       return {
-        message: AUTOMATION_BROWSER_WAITING_MESSAGE,
+        message: createAutomationBrowserWaitingMessage(run.retailer),
         status: "waiting",
       };
     }
@@ -163,7 +195,9 @@ async function publishWaiting(chat, payload) {
 export async function notifyIfBrowserChallengeVisible({
   browserRun,
   session,
+  pollIntervalMs,
   reason = "cloudflare",
+  timeoutMs,
 } = {}) {
   if (!browserRun || typeof browserRun.waitForUserAction !== "function") {
     return false;
@@ -171,7 +205,12 @@ export async function notifyIfBrowserChallengeVisible({
   if (!(await detectBrowserChallengeInSession(session))) {
     return false;
   }
-  await browserRun.waitForUserAction({ reason });
+  await browserRun.waitForUserAction({
+    isResolved: async () => !(await detectBrowserChallengeInSession(session)),
+    pollIntervalMs,
+    reason,
+    timeoutMs,
+  });
   return true;
 }
 
@@ -201,6 +240,57 @@ async function detectBrowserChallengeInSession(session) {
   }
 }
 
+async function waitForUserActionResolution({
+  hasUserReturnedFocus,
+  isResolved,
+  pollIntervalMs,
+  reason,
+  retailer,
+  session,
+  timeoutMs,
+  windowManager,
+}) {
+  const startedAt = Date.now();
+  const normalizedTimeoutMs = normalizeNonNegativeNumber(timeoutMs, "timeoutMs");
+  const normalizedPollIntervalMs = normalizeNonNegativeNumber(pollIntervalMs, "pollIntervalMs");
+
+  while (Date.now() - startedAt <= normalizedTimeoutMs) {
+    if ((await isResolved()) && (await userReturnedFocus({ hasUserReturnedFocus, session, windowManager }))) {
+      return;
+    }
+    await sleep(normalizedPollIntervalMs);
+  }
+
+  throw new Error(
+    `Timed out waiting for ${normalizeRetailer(retailer)} ${reason} challenge to be resolved.`,
+  );
+}
+
+async function userReturnedFocus({ hasUserReturnedFocus, session, windowManager }) {
+  if (typeof hasUserReturnedFocus === "function") {
+    return Boolean(await hasUserReturnedFocus());
+  }
+  if (session && typeof session.hasFocus === "function") {
+    return Boolean(await session.hasFocus());
+  }
+  if (session && typeof session.isFocused === "function") {
+    return Boolean(await session.isFocused());
+  }
+  if (typeof windowManager.hasFocus === "function") {
+    return Boolean(await windowManager.hasFocus(session));
+  }
+  if (typeof windowManager.isFocused === "function") {
+    return Boolean(await windowManager.isFocused(session));
+  }
+  return true;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 function normalizeRetailer(retailer) {
   if (typeof retailer !== "string" || !retailer.trim()) {
     throw new TypeError("retailer must be a non-empty string.");
@@ -213,4 +303,12 @@ function normalizeBoolean(value, field) {
     throw new TypeError(`${field} must be a boolean.`);
   }
   return value;
+}
+
+function normalizeNonNegativeNumber(value, field) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0) {
+    throw new TypeError(`${field} must be a non-negative finite number.`);
+  }
+  return number;
 }
