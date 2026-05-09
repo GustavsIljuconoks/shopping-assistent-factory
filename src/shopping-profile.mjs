@@ -13,7 +13,7 @@ export function createDefaultShoppingProfile(overrides = {}) {
     sizes: {},
     budgetAnchors: {},
     hardExclusions: [],
-    perItemPriceCeiling: { amount: 0, currency: "EUR" },
+    perItemPriceCeiling: { amount: 500, currency: "EUR" },
     enabledRetailers: [],
     memories: [],
     ...overrides,

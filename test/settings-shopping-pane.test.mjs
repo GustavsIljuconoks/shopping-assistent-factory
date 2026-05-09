@@ -220,7 +220,7 @@ test("renders the Shopping pane without profile data", () => {
   assert.match(html, /name="currency" type="text" value="EUR"/);
   assert.match(html, /name="sizes\.tops\.value"/);
   assert.match(html, /name="budgetAnchors\.tops\.amount"/);
-  assert.match(html, /name="perItemPriceCeiling\.amount" type="number"/);
+  assert.match(html, /name="perItemPriceCeiling\.amount" type="number"[^>]+value="500"/);
   assert.match(html, /name="hardExclusions"/);
   assert.equal((html.match(/name="enabledRetailers"/g) ?? []).length, DEFAULT_RETAILERS.length);
 });
@@ -398,6 +398,47 @@ test("disables proposal staging CTA when no candidate can be selected", () => {
   assert.match(html, /<button type="button" class="proposal-stage-button" disabled>/);
 });
 
+test("renders type-to-confirm prompt instead of Stage when a candidate exceeds the default ceiling", () => {
+  const html = renderRetailerProposalCard(
+    createProposalCard({
+      candidates: [
+        createCandidate({
+          price: "EUR 501",
+          selected: true,
+          title: "Premium Coat",
+        }),
+      ],
+    }),
+  );
+
+  assert.match(html, /data-stage-confirmation-required="true"/);
+  assert.match(html, /Type stage in chat to stage selected items/);
+  assert.match(html, /above the EUR 500 per-item ceiling/);
+  assert.doesNotMatch(html, /proposal-stage-button/);
+});
+
+test("uses the configured Shopping per-item ceiling for proposal staging gates", () => {
+  const html = renderSettingsShoppingPane({
+    profile: createDefaultShoppingProfile({
+      perItemPriceCeiling: { amount: 700, currency: "EUR" },
+    }),
+    proposalCards: [
+      createProposalCard({
+        candidates: [
+          createCandidate({
+            price: { amount: 650, currency: "EUR" },
+            selected: true,
+            title: "Heavy Coat",
+          }),
+        ],
+      }),
+    ],
+  });
+
+  assert.match(html, /Stage selected to Asket cart/);
+  assert.doesNotMatch(html, /data-stage-confirmation-required="true"/);
+});
+
 test("renders staged proposal result with open cart link", () => {
   const html = renderRetailerProposalCard(
     createProposalCard({
@@ -440,6 +481,8 @@ test("renders discovery-only proposal cards with a manual open link instead of S
   assert.match(html, /Open in ASOS to add manually/);
   assert.match(html, /href="https:\/\/www\.asos\.com\/asos-design\/product\/prd\/123"/);
   assert.doesNotMatch(html, /proposal-stage-button/);
+});
+
 test("renders failed proposal as a failure card with manual completion link", () => {
   const html = renderRetailerProposalCard(
     createProposalCard({

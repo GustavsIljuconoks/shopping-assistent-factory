@@ -41,6 +41,7 @@ test("creates a complete profile shape with required hard constraints", () => {
   assert.equal(profile.budgetAnchors.jeans.cadence, "seasonal");
   assert.equal(profile.budgetAnchors.jeans.notes, "Wait for sale");
   assert.deepEqual(profile.hardExclusions, ["leather", "dry clean only"]);
+  assert.equal(createDefaultShoppingProfile().perItemPriceCeiling.amount, 500);
   assert.equal(profile.perItemPriceCeiling.currency, "EUR");
   assert.deepEqual(profile.enabledRetailers, ["Zalando", "ASOS"]);
   assert.deepEqual(profile.memories, []);

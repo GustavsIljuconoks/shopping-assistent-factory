@@ -15,6 +15,7 @@ export const MAX_PROPOSAL_CANDIDATES_PER_RETAILER = 3;
 export const MAX_STAGING_ACTIONS_PER_CONVERSATION = 6;
 export const MAX_STAGING_ACTIONS_PER_RETAILER_PER_DAY = 10;
 export const SHOPPING_ACTION_CAP_WINDOW_MS = 24 * 60 * 60 * 1000;
+export const STAGE_CONFIRMATION_WORD = "stage";
 
 const DEFAULT_MIN_PROPOSAL_CONFIDENCE = 0.7;
 const DEFAULT_PROFILE_CONFIRMATION_MESSAGE = "Got it. I saved that to your shopping profile.";
@@ -70,6 +71,8 @@ export async function handleShoppingChatMessage({
   profile,
   pendingProfileField,
   confirmedProfileField,
+  pendingStageConfirmation,
+  confirmStage,
   profilePath,
   updateProfile = updateShoppingProfile,
   searchTool,
@@ -86,6 +89,15 @@ export async function handleShoppingChatMessage({
       confirmedProfileField,
       profilePath,
       updateProfile,
+    });
+  }
+
+  if (pendingStageConfirmation) {
+    return confirmPendingStage({
+      chat,
+      confirmStage,
+      pendingStageConfirmation,
+      text,
     });
   }
 
@@ -206,6 +218,38 @@ export async function handleShoppingChatMessage({
     proposalCard,
     searchResult,
     shoppingIntent,
+  };
+}
+
+async function confirmPendingStage({
+  chat,
+  confirmStage,
+  pendingStageConfirmation,
+  text,
+}) {
+  if (text !== STAGE_CONFIRMATION_WORD) {
+    const message = `Type ${STAGE_CONFIRMATION_WORD} to stage selected items.`;
+    await publishPlainText(chat, message, {
+      pendingStageConfirmation,
+      reason: "stage_confirmation_required",
+    });
+    return {
+      action: "stage_confirmation_required",
+      message,
+      pendingStageConfirmation,
+      reason: "stage_confirmation_required",
+    };
+  }
+
+  if (typeof confirmStage !== "function") {
+    throw new TypeError("confirmStage must be a function.");
+  }
+
+  const stagingResult = await confirmStage(pendingStageConfirmation);
+  return {
+    action: "stage_confirmed",
+    pendingStageConfirmation,
+    stagingResult,
   };
 }
 

@@ -30,6 +30,7 @@ export const SHOPPING_ACTIVITY_EMPTY_STATE =
   "No shopping activity has been recorded yet.";
 export const CONNECTED_RETAILERS_EMPTY_STATE =
   "No retailers are connected yet.";
+export const HIGH_PRICE_STAGE_CONFIRMATION_WORD = "stage";
 
 export const DEFAULT_GARMENT_CLASSES = Object.freeze([
   "tops",
@@ -53,7 +54,7 @@ export function renderSettingsShoppingPane({ connectedRetailers = [], profile, p
   const normalizedProfile = createDefaultShoppingProfile(profile ?? {});
   const profileState = profile ? "Profile data loaded." : "Using default shopping profile values.";
   const retailers = normalizeConnectedRetailers(connectedRetailers);
-  const proposals = normalizeProposalCards(proposalCards);
+  const proposals = normalizeProposalCards(proposalCards, normalizedProfile.perItemPriceCeiling);
   const connectedRetailersContent =
     retailers.length === 0
       ? `<p class="settings-empty-state">${escapeHtml(CONNECTED_RETAILERS_EMPTY_STATE)}</p>`
@@ -496,7 +497,9 @@ function renderMemorySubject(subject) {
 }
 
 export function renderRetailerProposalCard(proposal) {
-  return renderNormalizedRetailerProposalCard(normalizeProposalCard(proposal));
+  return renderNormalizedRetailerProposalCard(
+    normalizeProposalCard(proposal, createDefaultShoppingProfile().perItemPriceCeiling),
+  );
 }
 
 function renderNormalizedRetailerProposalCard(proposal) {
@@ -504,6 +507,7 @@ function renderNormalizedRetailerProposalCard(proposal) {
   const isStaged = proposal.staged;
 
   const isDiscoveryOnly = proposal.discoveryOnly && !isStaged;
+  const requiresTypeConfirmation = proposal.requiresTypeConfirmation && !isStaged && !isDiscoveryOnly;
   const hasFailure = Boolean(proposal.failure);
   const buttonDisabled = selectedCount === 0 || isStaged || hasFailure ? " disabled" : "";
   const selectedLabel = `${selectedCount} selected`;
@@ -529,12 +533,24 @@ function renderNormalizedRetailerProposalCard(proposal) {
     '      <footer class="proposal-card-footer">',
     `        <span>ETA: ${escapeHtml(proposal.eta)}</span>`,
     `        <span>Returns: ${escapeHtml(proposal.returnPolicy)}</span>`,
-    isDiscoveryOnly
+    requiresTypeConfirmation
+      ? renderTypeToConfirmStagePrompt(proposal)
+      : isDiscoveryOnly
       ? `        <a class="proposal-manual-link" href="${escapeHtml(proposal.manualUrl)}" target="_blank" rel="noreferrer">Open in ${escapeHtml(proposal.retailer)} to add manually</a>`
       : `        <button type="button" class="proposal-stage-button"${buttonDisabled}>Stage selected to ${escapeHtml(proposal.retailer)} cart</button>`,
     "      </footer>",
     "    </article>",
   ].filter(Boolean).join("\n");
+}
+
+function renderTypeToConfirmStagePrompt(proposal) {
+  const ceiling = formatMoney(proposal.typeConfirmationCeiling);
+  return [
+    '        <div class="proposal-stage-confirmation" role="status" data-stage-confirmation-required="true">',
+    `          <strong>Type ${escapeHtml(HIGH_PRICE_STAGE_CONFIRMATION_WORD)} in chat to stage selected items</strong>`,
+    `          <span>One or more candidates are above the ${escapeHtml(ceiling)} per-item ceiling.</span>`,
+    "        </div>",
+  ].join("\n");
 }
 
 function renderProposalFailureCard(proposal, selectedLabel, buttonDisabled) {
@@ -623,12 +639,12 @@ function normalizeConnectedRetailers(connectedRetailers) {
   });
 }
 
-function normalizeProposalCards(proposalCards) {
+function normalizeProposalCards(proposalCards, defaultPriceCeiling) {
   if (!Array.isArray(proposalCards)) {
     throw new TypeError("proposalCards must be an array.");
   }
 
-  return proposalCards.map((proposal) => normalizeProposalCard(proposal));
+  return proposalCards.map((proposal) => normalizeProposalCard(proposal, defaultPriceCeiling));
 }
 
 function normalizeMemories(memories) {
@@ -705,7 +721,7 @@ function normalizeOptionalSubject(subject, field) {
   return normalized;
 }
 
-function normalizeProposalCard(proposal) {
+function normalizeProposalCard(proposal, defaultPriceCeiling) {
   if (!proposal || typeof proposal !== "object" || Array.isArray(proposal)) {
     throw new TypeError("proposalCards entries must be objects.");
   }
@@ -719,6 +735,13 @@ function normalizeProposalCard(proposal) {
           ...candidate,
           selected: index === 0,
         }));
+  const typeConfirmationCeiling = normalizeProposalPriceCeiling(
+    proposal.perItemPriceCeiling ?? proposal.priceCeiling ?? defaultPriceCeiling,
+    "proposal per-item ceiling",
+  );
+  const requiresTypeConfirmation = candidatesWithSelection.some((candidate) =>
+    candidateExceedsPriceCeiling(candidate, typeConfirmationCeiling),
+  );
 
   return {
     retailer: normalizeString(proposal.retailer ?? proposal.retailerName, "proposal retailer"),
@@ -727,6 +750,8 @@ function normalizeProposalCard(proposal) {
     cartUrl: normalizeString(proposal.cartUrl, "proposal cart URL"),
     candidates: candidatesWithSelection,
     discoveryOnly: Boolean(proposal.discoveryOnly ?? proposal.retailerStatus?.discoveryOnly),
+    requiresTypeConfirmation,
+    typeConfirmationCeiling,
     manualUrl: normalizeString(
       proposal.manualUrl ??
         candidatesWithSelection.find((candidate) => candidate.selected)?.productUrl ??
@@ -752,6 +777,7 @@ function normalizeProposalCandidates(candidates) {
     }
 
     const title = normalizeString(candidate.title, "candidate title");
+    const price = normalizeProposalCandidatePrice(candidate.price, "candidate price");
     return {
       id: normalizeId(candidate.id ?? `${candidate.brand ?? "candidate"}-${index}`),
       imageUrl: normalizeString(candidate.imageUrl, "candidate image URL"),
@@ -760,12 +786,88 @@ function normalizeProposalCandidates(candidates) {
       title,
       size: normalizeString(candidate.size, "candidate size"),
       color: normalizeString(candidate.color, "candidate color"),
-      price: normalizeString(candidate.price, "candidate price"),
+      price: price.label,
+      priceValue: price.value,
       reasoning: normalizeString(candidate.reasoning, "candidate reasoning"),
       productUrl: normalizeString(candidate.productUrl, "candidate product URL"),
       selected: Boolean(candidate.selected),
     };
   });
+}
+
+function normalizeProposalCandidatePrice(value, field) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const amount = normalizeOptionalAmount(value.amount);
+    if (amount === undefined) {
+      throw new TypeError(`${field}.amount must be provided.`);
+    }
+    const currency = value.currency === undefined ? "EUR" : normalizeString(value.currency, `${field}.currency`);
+    return {
+      label: formatMoney({ amount, currency }),
+      value: { amount, currency: currency.toUpperCase() },
+    };
+  }
+
+  const label = normalizeString(value, field);
+  return {
+    label,
+    value: parseMoney(label),
+  };
+}
+
+function normalizeProposalPriceCeiling(value, field) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`${field} must be a money object.`);
+  }
+  const amount = normalizeOptionalAmount(value.amount);
+  if (amount === undefined) {
+    throw new TypeError(`${field}.amount must be provided.`);
+  }
+  return {
+    amount,
+    currency: normalizeString(value.currency ?? "EUR", `${field}.currency`).toUpperCase(),
+  };
+}
+
+function candidateExceedsPriceCeiling(candidate, ceiling) {
+  const price = candidate.priceValue;
+  if (!price || price.currency !== ceiling.currency) {
+    return false;
+  }
+  return price.amount > ceiling.amount;
+}
+
+function parseMoney(value) {
+  const text = String(value);
+  const amountMatch = text.match(/([0-9]+(?:[.,][0-9]{1,2})?)/);
+  if (!amountMatch) {
+    return undefined;
+  }
+
+  const amount = Number.parseFloat(amountMatch[1].replace(",", "."));
+  if (!Number.isFinite(amount)) {
+    return undefined;
+  }
+
+  return {
+    amount,
+    currency: parseCurrency(text),
+  };
+}
+
+function parseCurrency(value) {
+  const text = String(value).toUpperCase();
+  if (text.includes("USD") || text.includes("$")) {
+    return "USD";
+  }
+  if (text.includes("GBP")) {
+    return "GBP";
+  }
+  return "EUR";
+}
+
+function formatMoney(value) {
+  return `${normalizeString(value.currency ?? "EUR", "currency").toUpperCase()} ${Number(value.amount)}`;
 }
 
 function applySizeChange(profile, change) {
