@@ -11,6 +11,7 @@ export const SHOPPING_CHAT_LOW_CONFIDENCE_MESSAGE =
 export const ASKET_CART_URL = "https://www.asket.com/cart";
 export const ASOS_CART_URL = "https://www.asos.com/basket/";
 export const SHOPPING_FEED_ITEM_TYPE = "shopping_feed_item";
+export const STAGE_CONFIRMATION_WORD = "stage";
 
 const DEFAULT_MIN_PROPOSAL_CONFIDENCE = 0.7;
 const DEFAULT_PROFILE_CONFIRMATION_MESSAGE = "Got it. I saved that to your shopping profile.";
@@ -66,6 +67,8 @@ export async function handleShoppingChatMessage({
   profile,
   pendingProfileField,
   confirmedProfileField,
+  pendingStageConfirmation,
+  confirmStage,
   profilePath,
   updateProfile = updateShoppingProfile,
   searchTool,
@@ -82,6 +85,15 @@ export async function handleShoppingChatMessage({
       confirmedProfileField,
       profilePath,
       updateProfile,
+    });
+  }
+
+  if (pendingStageConfirmation) {
+    return confirmPendingStage({
+      chat,
+      confirmStage,
+      pendingStageConfirmation,
+      text,
     });
   }
 
@@ -202,6 +214,38 @@ export async function handleShoppingChatMessage({
     proposalCard,
     searchResult,
     shoppingIntent,
+  };
+}
+
+async function confirmPendingStage({
+  chat,
+  confirmStage,
+  pendingStageConfirmation,
+  text,
+}) {
+  if (text !== STAGE_CONFIRMATION_WORD) {
+    const message = `Type ${STAGE_CONFIRMATION_WORD} to stage selected items.`;
+    await publishPlainText(chat, message, {
+      pendingStageConfirmation,
+      reason: "stage_confirmation_required",
+    });
+    return {
+      action: "stage_confirmation_required",
+      message,
+      pendingStageConfirmation,
+      reason: "stage_confirmation_required",
+    };
+  }
+
+  if (typeof confirmStage !== "function") {
+    throw new TypeError("confirmStage must be a function.");
+  }
+
+  const stagingResult = await confirmStage(pendingStageConfirmation);
+  return {
+    action: "stage_confirmed",
+    pendingStageConfirmation,
+    stagingResult,
   };
 }
 

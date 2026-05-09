@@ -326,6 +326,53 @@ test("persists a confirmed bootstrap field to the shopping profile", async () =>
   ]);
 });
 
+test("does not stage high-price pending proposals until the literal confirmation word is typed", async () => {
+  let staged = false;
+  const messages = [];
+
+  const result = await handleShoppingChatMessage({
+    chat: {
+      async say(message, payload) {
+        messages.push([message, payload.reason]);
+      },
+    },
+    message: "Stage",
+    pendingStageConfirmation: {
+      retailer: "Asket",
+      selectedCandidateIds: ["coat-1"],
+    },
+    async confirmStage() {
+      staged = true;
+    },
+  });
+
+  assert.equal(staged, false);
+  assert.equal(result.action, "stage_confirmation_required");
+  assert.deepEqual(messages, [["Type stage to stage selected items.", "stage_confirmation_required"]]);
+});
+
+test("stages high-price pending proposals after exact type-to-confirm input", async () => {
+  const result = await handleShoppingChatMessage({
+    message: "stage",
+    pendingStageConfirmation: {
+      retailer: "Asket",
+      selectedCandidateIds: ["coat-1"],
+    },
+    async confirmStage(pendingStageConfirmation) {
+      return {
+        retailer: pendingStageConfirmation.retailer,
+        status: "success",
+      };
+    },
+  });
+
+  assert.equal(result.action, "stage_confirmed");
+  assert.deepEqual(result.stagingResult, {
+    retailer: "Asket",
+    status: "success",
+  });
+});
+
 test("asks only for a new garment-specific size after bootstrap basics are known", async () => {
   const result = await handleShoppingChatMessage({
     message: "Find a dress under 120 euros",
