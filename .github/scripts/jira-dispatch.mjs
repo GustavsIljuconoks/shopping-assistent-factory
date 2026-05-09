@@ -151,6 +151,20 @@ async function appendGithubEnv(values) {
   await writeFile(file, body + "\n", { flag: "a" });
 }
 
+/** Step outputs for workflow `if:` — GITHUB_ENV is not visible in env context there. */
+async function appendGithubOutput(values) {
+  const file = env.GITHUB_OUTPUT;
+  if (!file) return;
+  const body = Object.entries(values)
+    .map(([k, v]) => {
+      const s = String(v ?? "");
+      if (s.includes("\n")) throw new Error(`appendGithubOutput: multiline value for ${k}`);
+      return `${k}=${s}\n`;
+    })
+    .join("");
+  await writeFile(file, body, { flag: "a" });
+}
+
 async function pathExists(p) {
   try {
     await access(p);
@@ -302,6 +316,7 @@ async function prepareDispatch() {
     RUN_DIR: runDir,
     PROMPT_FILE: promptFile,
   });
+  await appendGithubOutput({ should_run: "true", kind });
 
   const agentLabel = (env.AGENT_BACKEND || "claude").toLowerCase();
   console.log(
@@ -409,6 +424,7 @@ async function recordRun() {
   await writeFile(transcriptFile, block, { flag: "a" });
 
   await appendGithubEnv({ NEW_SESSION_ID: newSessionId });
+  await appendGithubOutput({ new_session_id: newSessionId || "" });
   console.log(`Recorded run for ${env.ISSUE_KEY}: session=${newSessionId || "<none>"}`);
 }
 
