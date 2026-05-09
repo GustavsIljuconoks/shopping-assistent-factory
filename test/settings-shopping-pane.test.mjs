@@ -160,6 +160,21 @@ test("renders connected retailer status in the Shopping pane", () => {
   assert.match(html, /<span class="connected-retailer-status">Connected<\/span>/);
 });
 
+test("renders discovery-only status for connected retailers", () => {
+  const html = renderSettingsShoppingPane({
+    connectedRetailers: [
+      {
+        retailerIdentifier: "Asket",
+        status: "Connected",
+        discoveryOnly: true,
+      },
+    ],
+  });
+
+  assert.match(html, /connected-retailer--discovery-only/);
+  assert.match(html, /<span class="connected-retailer-status">Discovery-only<\/span>/);
+});
+
 test("persists individual Settings Shopping changes immediately", async () => {
   const dir = await mkdtemp(join(tmpdir(), "settings-shopping-pane-"));
   const path = join(dir, "profile.json");
@@ -295,6 +310,27 @@ test("renders staged proposal result with open cart link", () => {
   assert.match(html, /<button type="button" class="proposal-stage-button" disabled>/);
 });
 
+test("renders discovery-only proposal cards with a manual open link instead of Stage", () => {
+  const html = renderRetailerProposalCard(
+    createProposalCard({
+      retailer: "ASOS",
+      discoveryOnly: true,
+      candidates: [
+        createCandidate({
+          brand: "ASOS",
+          productUrl: "https://www.asos.com/asos-design/product/prd/123",
+          selected: true,
+          title: "ASOS Tee",
+        }),
+      ],
+    }),
+  );
+
+  assert.match(html, /proposal-card--discovery-only/);
+  assert.match(html, /discovery-only/);
+  assert.match(html, /Open in ASOS to add manually/);
+  assert.match(html, /href="https:\/\/www\.asos\.com\/asos-design\/product\/prd\/123"/);
+  assert.doesNotMatch(html, /proposal-stage-button/);
 test("renders failed proposal as a failure card with manual completion link", () => {
   const html = renderRetailerProposalCard(
     createProposalCard({
