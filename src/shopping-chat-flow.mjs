@@ -106,6 +106,7 @@ export async function handleShoppingChatMessage({
 
   const searchContext = {
     garmentClass,
+    memories: Array.isArray(profile?.memories) ? profile.memories : [],
     originalMessage: text,
     priceCeiling,
     size,

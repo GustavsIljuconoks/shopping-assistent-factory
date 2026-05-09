@@ -93,6 +93,7 @@ test("uses profile size and budget before dispatching search and rendering a pro
   assert.deepEqual(searches, [
     {
       garmentClass: "tops",
+      memories: [],
       originalMessage: "Find a crisp shirt for the office",
       priceCeiling: { amount: 90, currency: "EUR" },
       size: { system: "International", value: "M" },
