@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Settings / Shopping</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      body {
+        margin: 0;
+        background: Canvas;
+        color: CanvasText;
+      }
+
+      main {
+        max-width: 760px;
+        padding: 32px;
+      }
+
+      .settings-breadcrumb {
+        align-items: center;
+        display: flex;
+        gap: 8px;
+        margin-bottom: 24px;
+      }
+
+      .settings-pane {
+        border-top: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+        padding-top: 24px;
+      }
+
+      form {
+        display: grid;
+        gap: 16px;
+      }
+
+      label {
+        display: grid;
+        gap: 6px;
+      }
+
+      input {
+        border: 1px solid color-mix(in srgb, CanvasText 24%, transparent);
+        border-radius: 6px;
+        font: inherit;
+        padding: 10px 12px;
+      }
+
+      button {
+        justify-self: start;
+        border: 0;
+        border-radius: 6px;
+        background: #0f766e;
+        color: white;
+        font: inherit;
+        padding: 10px 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <main id="shopping-settings-root"></main>
+    <script type="module">
+      import { renderShoppingSettingsPane } from "./settings-pane.mjs";
+
+      renderShoppingSettingsPane(document.querySelector("#shopping-settings-root"));
+    </script>
+  </body>
+</html>
