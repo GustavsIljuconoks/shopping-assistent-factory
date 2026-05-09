@@ -6,6 +6,7 @@ export const SHOPPING_CHAT_LOW_CONFIDENCE_MESSAGE =
   "I found shopping intent, but I am not confident enough to make a proposal yet.";
 export const ASKET_CART_URL = "https://www.asket.com/cart";
 export const ASOS_CART_URL = "https://www.asos.com/basket/";
+export const SHOPPING_FEED_ITEM_TYPE = "shopping_feed_item";
 
 const DEFAULT_MIN_PROPOSAL_CONFIDENCE = 0.7;
 const DEFAULT_PROFILE_CONFIRMATION_MESSAGE = "Got it. I saved that to your shopping profile.";
@@ -292,6 +293,7 @@ export async function stageSelectedAsketCandidates({
     action: "asket_staging_result",
     activeCarts,
     cartUrl,
+    feedItems: createStagingResultFeedItems(results, ASKET_RETAILER),
     resultCard: await renderResultCard({
       cartUrl,
       results,
@@ -384,6 +386,7 @@ export async function stageSelectedAsosCandidates({
     action: "asos_staging_result",
     activeCarts,
     cartUrl,
+    feedItems: createStagingResultFeedItems(results, ASOS_RETAILER),
     resultCard: await renderResultCard({
       cartUrl,
       results,
@@ -394,6 +397,30 @@ export async function stageSelectedAsosCandidates({
     stagedCount,
     totalSelected: candidates.length,
   };
+}
+
+export function createStagedAtRetailerFeedItem(retailer) {
+  return createRetailerFeedItem({
+    event: "staging_succeeded",
+    retailer,
+    title: `Staged at ${normalizeNonEmptyString(retailer, "retailer")}`,
+  });
+}
+
+export function createStagingFailedAtRetailerFeedItem(retailer) {
+  return createRetailerFeedItem({
+    event: "staging_failed",
+    retailer,
+    title: `Staging failed at ${normalizeNonEmptyString(retailer, "retailer")}`,
+  });
+}
+
+export function createDiscoveryOnlyRetailerFeedItem(retailer) {
+  return createRetailerFeedItem({
+    event: "discovery_only",
+    retailer,
+    title: `${normalizeNonEmptyString(retailer, "retailer")} in discovery-only mode`,
+  });
 }
 
 export function detectShoppingIntent(message) {
@@ -787,6 +814,35 @@ async function publishPlainText(chat, message, payload) {
   if (typeof chat === "function") {
     await chat(message, payload);
   }
+}
+
+function createStagingResultFeedItems(results, retailer) {
+  if (!Array.isArray(results) || results.length === 0) {
+    return [];
+  }
+
+  const hasSuccess = results.some(({ result }) => result?.status === "success");
+  const hasFailure = results.some(({ result }) => result?.status && result.status !== "success");
+  const feedItems = [];
+
+  if (hasSuccess) {
+    feedItems.push(createStagedAtRetailerFeedItem(retailer));
+  }
+  if (hasFailure) {
+    feedItems.push(createStagingFailedAtRetailerFeedItem(retailer));
+  }
+
+  return feedItems;
+}
+
+function createRetailerFeedItem({ event, retailer, title }) {
+  const normalizedRetailer = normalizeNonEmptyString(retailer, "retailer");
+  return {
+    event: normalizeNonEmptyString(event, "event"),
+    retailer: normalizedRetailer,
+    title: normalizeNonEmptyString(title, "title"),
+    type: SHOPPING_FEED_ITEM_TYPE,
+  };
 }
 
 function detectGarmentWord(text) {

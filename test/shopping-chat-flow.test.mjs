@@ -5,6 +5,7 @@ import {
   ASKET_CART_URL,
   ASOS_CART_URL,
   SHOPPING_CHAT_LOW_CONFIDENCE_MESSAGE,
+  createDiscoveryOnlyRetailerFeedItem,
   createProfileConfirmationCard,
   detectShoppingIntent,
   findMissingBootstrapField,
@@ -332,6 +333,14 @@ test("stages selected Asket candidates in sequence and refreshes active carts af
   assert.equal(result.stagedCount, 2);
   assert.equal(result.totalSelected, 2);
   assert.deepEqual(result.activeCarts, [{ itemCount: 2, retailer: "Asket" }]);
+  assert.deepEqual(result.feedItems, [
+    {
+      event: "staging_succeeded",
+      retailer: "Asket",
+      title: "Staged at Asket",
+      type: "shopping_feed_item",
+    },
+  ]);
   assert.deepEqual(result.resultCard, {
     openCartLink: {
       href: ASKET_CART_URL,
@@ -379,6 +388,20 @@ test("does not refresh active carts for unsuccessful staging results", async () 
     updates.map((update) => update.stagedCount),
     [1],
   );
+  assert.deepEqual(result.feedItems, [
+    {
+      event: "staging_succeeded",
+      retailer: "Asket",
+      title: "Staged at Asket",
+      type: "shopping_feed_item",
+    },
+    {
+      event: "staging_failed",
+      retailer: "Asket",
+      title: "Staging failed at Asket",
+      type: "shopping_feed_item",
+    },
+  ]);
 });
 
 test("returns an Asket result card for zero selected candidates without staging", async () => {
@@ -393,6 +416,7 @@ test("returns an Asket result card for zero selected candidates without staging"
 
   assert.equal(touchedCart, false);
   assert.equal(result.stagedCount, 0);
+  assert.deepEqual(result.feedItems, []);
   assert.deepEqual(renderAsketStagingResultCard({ stagedCount: 0, totalSelected: 0 }), {
     openCartLink: {
       href: ASKET_CART_URL,
@@ -458,6 +482,14 @@ test("stages selected ASOS candidates in sequence and refreshes active carts aft
   );
   assert.equal(result.action, "asos_staging_result");
   assert.equal(result.stagedCount, 2);
+  assert.deepEqual(result.feedItems, [
+    {
+      event: "staging_succeeded",
+      retailer: "ASOS",
+      title: "Staged at ASOS",
+      type: "shopping_feed_item",
+    },
+  ]);
   assert.deepEqual(result.resultCard, {
     openCartLink: {
       href: ASOS_CART_URL,
@@ -481,6 +513,7 @@ test("returns an ASOS result card for zero selected candidates without staging",
   });
 
   assert.equal(touchedCart, false);
+  assert.deepEqual(result.feedItems, []);
   assert.deepEqual(renderAsosStagingResultCard({ stagedCount: 0, totalSelected: 0 }), {
     openCartLink: {
       href: ASOS_CART_URL,
@@ -490,6 +523,15 @@ test("returns an ASOS result card for zero selected candidates without staging",
     stagedCount: 0,
     totalSelected: 0,
     type: "asos_staging_result_card",
+  });
+});
+
+test("creates a discovery-only Feed item for retailer circuit-breaker mode", () => {
+  assert.deepEqual(createDiscoveryOnlyRetailerFeedItem("Zalando.lv"), {
+    event: "discovery_only",
+    retailer: "Zalando.lv",
+    title: "Zalando.lv in discovery-only mode",
+    type: "shopping_feed_item",
   });
 });
 
