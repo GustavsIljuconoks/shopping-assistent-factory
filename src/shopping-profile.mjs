@@ -69,7 +69,7 @@ export function normalizeShoppingProfile(profile) {
     currency,
     sizes: normalizeRecord(profile.sizes, "sizes", normalizeSize),
     budgetAnchors: normalizeRecord(profile.budgetAnchors, "budgetAnchors", (value, key) =>
-      normalizeMoney(value, `budgetAnchors.${key}`, currency),
+      normalizeBudgetAnchor(value, key, currency),
     ),
     hardExclusions: normalizeUniqueStringArray(profile.hardExclusions, "hardExclusions"),
     perItemPriceCeiling,
@@ -143,6 +143,26 @@ function normalizeMoney(value, field, defaultCurrency) {
         ? defaultCurrency
         : normalizeCode(value.currency, `${field}.currency`, 3),
   };
+}
+
+function normalizeBudgetAnchor(value, key, defaultCurrency) {
+  const field = `budgetAnchors.${key}`;
+  const normalized = normalizeMoney(value, field, defaultCurrency);
+
+  if (value.cadence !== undefined) {
+    if (!["per_item", "monthly", "seasonal", "annual"].includes(value.cadence)) {
+      throw new TypeError(`${field}.cadence must be per_item, monthly, seasonal, or annual.`);
+    }
+    normalized.cadence = value.cadence;
+  }
+  if (value.notes !== undefined) {
+    if (typeof value.notes !== "string") {
+      throw new TypeError(`${field}.notes must be a string.`);
+    }
+    normalized.notes = value.notes.trim();
+  }
+
+  return normalized;
 }
 
 function normalizeUniqueStringArray(value, field) {

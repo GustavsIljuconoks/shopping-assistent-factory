@@ -20,7 +20,7 @@ test("creates a complete profile shape with required hard constraints", () => {
       shoes: { value: "42", system: "EU" },
     },
     budgetAnchors: {
-      jeans: { amount: 80 },
+      jeans: { amount: 80, cadence: "seasonal", notes: "Wait for sale" },
     },
     hardExclusions: ["leather", "leather", "dry clean only"],
     perItemPriceCeiling: { amount: 150 },
@@ -31,6 +31,8 @@ test("creates a complete profile shape with required hard constraints", () => {
   assert.equal(profile.currency, "EUR");
   assert.deepEqual(Object.keys(profile.sizes), ["tops", "shoes"]);
   assert.equal(profile.budgetAnchors.jeans.currency, "EUR");
+  assert.equal(profile.budgetAnchors.jeans.cadence, "seasonal");
+  assert.equal(profile.budgetAnchors.jeans.notes, "Wait for sale");
   assert.deepEqual(profile.hardExclusions, ["leather", "dry clean only"]);
   assert.equal(profile.perItemPriceCeiling.currency, "EUR");
   assert.deepEqual(profile.enabledRetailers, ["Zalando", "ASOS"]);
