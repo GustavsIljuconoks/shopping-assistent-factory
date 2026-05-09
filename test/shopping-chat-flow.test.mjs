@@ -5,6 +5,7 @@ import {
   ASKET_CART_URL,
   ASOS_CART_URL,
   SHOPPING_CHAT_LOW_CONFIDENCE_MESSAGE,
+  createShoppingActionCapState,
   createStagingFailureExplanation,
   createDiscoveryOnlyRetailerFeedItem,
   createProfileConfirmationCard,
@@ -562,7 +563,10 @@ test("records Asket staging failures and emits a feed item when discovery-only s
 
   assert.equal(status.discoveryOnly, true);
   assert.equal(status.failureCount, 3);
-  assert.equal(result.feedItems.length, 1);
+  assert.equal(result.feedItems.length, 2);
+  assert.equal(result.feedItems[0].type, "shopping_feed_item");
+  assert.equal(result.feedItems[0].event, "staging_failed");
+  assert.equal(result.feedItems[1].type, "shopping_retailer_discovery_only");
   assert.equal(feedItems.length, 1);
   assert.equal(feedItems[0].type, "shopping_retailer_discovery_only");
 });
@@ -621,6 +625,35 @@ test("returns an Asket result card for zero selected candidates without staging"
     totalSelected: 0,
     type: "asket_staging_result_card",
   });
+});
+
+test("blocks staging after 6 actions in a conversation with a plain-text explanation", async () => {
+  let touchedCart = false;
+
+  const result = await stageSelectedAsketCandidates({
+    actionCapState: createShoppingActionCapState({
+      conversationActionCount: 6,
+    }),
+    now() {
+      return new Date("2026-05-09T12:00:00.000Z");
+    },
+    selectedCandidates: [
+      {
+        productUrl: "https://www.asket.com/products/the-t-shirt",
+        size: "M",
+      },
+    ],
+    async stageCartItem() {
+      touchedCart = true;
+    },
+  });
+
+  assert.equal(touchedCart, false);
+  assert.equal(result.action, "asket_staging_blocked");
+  assert.equal(result.capViolation.cap, "conversation");
+  assert.match(result.plainText, /conversation can stage up to 6 items/);
+  assert.deepEqual(result.results, []);
+  assert.equal(result.stagedCount, 0);
 });
 
 test("stages selected ASOS candidates in sequence and refreshes active carts after each success", async () => {
@@ -718,6 +751,41 @@ test("returns an ASOS result card for zero selected candidates without staging",
     totalSelected: 0,
     type: "asos_staging_result_card",
   });
+});
+
+test("blocks staging after 10 retailer actions in 24 hours with a plain-text explanation", async () => {
+  let touchedCart = false;
+  const stagedAt = Array.from(
+    { length: 10 },
+    (_, index) => new Date(Date.UTC(2026, 4, 9, index)).toISOString(),
+  );
+
+  const result = await stageSelectedAsosCandidates({
+    actionCapState: createShoppingActionCapState({
+      retailers: {
+        ASOS: { stagedAt },
+      },
+    }),
+    now() {
+      return new Date("2026-05-09T12:00:00.000Z");
+    },
+    selectedCandidates: [
+      {
+        productUrl: "https://www.asos.com/asos-design/product/prd/123",
+        size: "M",
+      },
+    ],
+    async stageCartItem() {
+      touchedCart = true;
+    },
+  });
+
+  assert.equal(touchedCart, false);
+  assert.equal(result.action, "asos_staging_blocked");
+  assert.equal(result.capViolation.cap, "retailer_24h");
+  assert.match(result.plainText, /ASOS has reached the staging cap of 10 items in 24 hours/);
+  assert.deepEqual(result.results, []);
+  assert.equal(result.stagedCount, 0);
 });
 
 test("returns plain-English staging failure cards", () => {

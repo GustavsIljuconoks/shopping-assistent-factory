@@ -11,6 +11,10 @@ export const SHOPPING_CHAT_LOW_CONFIDENCE_MESSAGE =
 export const ASKET_CART_URL = "https://www.asket.com/cart";
 export const ASOS_CART_URL = "https://www.asos.com/basket/";
 export const SHOPPING_FEED_ITEM_TYPE = "shopping_feed_item";
+export const MAX_PROPOSAL_CANDIDATES_PER_RETAILER = 3;
+export const MAX_STAGING_ACTIONS_PER_CONVERSATION = 6;
+export const MAX_STAGING_ACTIONS_PER_RETAILER_PER_DAY = 10;
+export const SHOPPING_ACTION_CAP_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 const DEFAULT_MIN_PROPOSAL_CONFIDENCE = 0.7;
 const DEFAULT_PROFILE_CONFIRMATION_MESSAGE = "Got it. I saved that to your shopping profile.";
@@ -266,6 +270,7 @@ export async function stageSelectedAsketCandidates({
   page,
   browserRun,
   auditLogPath,
+  actionCapState,
   stageCartItem = stageAsketCartItem,
   refreshActiveCarts,
   renderResultCard = renderAsketStagingResultCard,
@@ -283,10 +288,28 @@ export async function stageSelectedAsketCandidates({
   }
 
   const results = [];
-  const feedItems = [];
+  const circuitBreakerFeedItems = [];
+  let nextActionCapState = createShoppingActionCapState(actionCapState);
   let stagedCount = 0;
   let activeCarts;
   let nextCircuitBreakerState = circuitBreakerState;
+  const actionCapNow = actionCapState === undefined ? new Date() : now();
+  const capViolation = checkShoppingActionCaps(nextActionCapState, ASKET_RETAILER, candidates.length, {
+    now: actionCapNow,
+  });
+
+  if (capViolation) {
+    return createStagingCapBlockedResult({
+      action: "asket_staging_blocked",
+      actionCapState: nextActionCapState,
+      cartUrl,
+      circuitBreakerState: nextCircuitBreakerState,
+      message: capViolation.message,
+      retailer: ASKET_RETAILER,
+      totalSelected: candidates.length,
+      violation: capViolation,
+    });
+  }
 
   for (const candidate of candidates) {
     const result = await stageCartItem({
@@ -316,28 +339,38 @@ export async function stageSelectedAsketCandidates({
           stagedCount,
         });
       }
-    } else if (nextCircuitBreakerState && typeof recordStagingFailure === "function") {
-      const circuitBreakerResult = recordStagingFailure(
-        nextCircuitBreakerState,
-        ASKET_RETAILER,
-        {
-          emitFeedItem,
-          now: now(),
-        },
-      );
-      nextCircuitBreakerState = circuitBreakerResult.state;
-      if (circuitBreakerResult.feedItem) {
-        feedItems.push(circuitBreakerResult.feedItem);
+    } else {
+      await foregroundStagingFailurePage({ browserRun, page });
+      if (nextCircuitBreakerState && typeof recordStagingFailure === "function") {
+        const circuitBreakerResult = recordStagingFailure(
+          nextCircuitBreakerState,
+          ASKET_RETAILER,
+          {
+            emitFeedItem,
+            now: now(),
+          },
+        );
+        nextCircuitBreakerState = circuitBreakerResult.state;
+        if (circuitBreakerResult.feedItem) {
+          circuitBreakerFeedItems.push(circuitBreakerResult.feedItem);
+        }
       }
     }
   }
+  nextActionCapState = recordShoppingStagingActions(nextActionCapState, ASKET_RETAILER, candidates.length, {
+    now: actionCapNow,
+  });
 
   return {
     action: "asket_staging_result",
     activeCarts,
+    actionCapState: nextActionCapState,
     cartUrl,
     circuitBreakerState: nextCircuitBreakerState,
-    feedItems,
+    feedItems: [
+      ...createStagingResultFeedItems(results, ASKET_RETAILER),
+      ...circuitBreakerFeedItems,
+    ],
     resultCard: await renderResultCard({
       cartUrl,
       results,
@@ -457,7 +490,10 @@ export async function searchEnabledRetailersInParallel({
   };
 }
 
-export function assembleMultiRetailerProposal(retailerResults, { maxCandidatesPerRetailer = 3 } = {}) {
+export function assembleMultiRetailerProposal(
+  retailerResults,
+  { maxCandidatesPerRetailer = MAX_PROPOSAL_CANDIDATES_PER_RETAILER } = {},
+) {
   if (!Array.isArray(retailerResults)) {
     throw new TypeError("retailerResults must be an array.");
   }
@@ -483,6 +519,7 @@ export async function stageSelectedAsosCandidates({
   page,
   browserRun,
   auditLogPath,
+  actionCapState,
   stageCartItem = stageAsosCartItem,
   refreshActiveCarts,
   renderResultCard = renderAsosStagingResultCard,
@@ -500,10 +537,28 @@ export async function stageSelectedAsosCandidates({
   }
 
   const results = [];
-  const feedItems = [];
+  const circuitBreakerFeedItems = [];
+  let nextActionCapState = createShoppingActionCapState(actionCapState);
   let stagedCount = 0;
   let activeCarts;
   let nextCircuitBreakerState = circuitBreakerState;
+  const actionCapNow = actionCapState === undefined ? new Date() : now();
+  const capViolation = checkShoppingActionCaps(nextActionCapState, ASOS_RETAILER, candidates.length, {
+    now: actionCapNow,
+  });
+
+  if (capViolation) {
+    return createStagingCapBlockedResult({
+      action: "asos_staging_blocked",
+      actionCapState: nextActionCapState,
+      cartUrl,
+      circuitBreakerState: nextCircuitBreakerState,
+      message: capViolation.message,
+      retailer: ASOS_RETAILER,
+      totalSelected: candidates.length,
+      violation: capViolation,
+    });
+  }
 
   for (const candidate of candidates) {
     const result = await stageCartItem({
@@ -534,28 +589,38 @@ export async function stageSelectedAsosCandidates({
           stagedCount,
         });
       }
-    } else if (nextCircuitBreakerState && typeof recordStagingFailure === "function") {
-      const circuitBreakerResult = recordStagingFailure(
-        nextCircuitBreakerState,
-        ASOS_RETAILER,
-        {
-          emitFeedItem,
-          now: now(),
-        },
-      );
-      nextCircuitBreakerState = circuitBreakerResult.state;
-      if (circuitBreakerResult.feedItem) {
-        feedItems.push(circuitBreakerResult.feedItem);
+    } else {
+      await foregroundStagingFailurePage({ browserRun, page });
+      if (nextCircuitBreakerState && typeof recordStagingFailure === "function") {
+        const circuitBreakerResult = recordStagingFailure(
+          nextCircuitBreakerState,
+          ASOS_RETAILER,
+          {
+            emitFeedItem,
+            now: now(),
+          },
+        );
+        nextCircuitBreakerState = circuitBreakerResult.state;
+        if (circuitBreakerResult.feedItem) {
+          circuitBreakerFeedItems.push(circuitBreakerResult.feedItem);
+        }
       }
     }
   }
+  nextActionCapState = recordShoppingStagingActions(nextActionCapState, ASOS_RETAILER, candidates.length, {
+    now: actionCapNow,
+  });
 
   return {
     action: "asos_staging_result",
     activeCarts,
+    actionCapState: nextActionCapState,
     cartUrl,
     circuitBreakerState: nextCircuitBreakerState,
-    feedItems: createStagingResultFeedItems(results, ASOS_RETAILER),
+    feedItems: [
+      ...createStagingResultFeedItems(results, ASOS_RETAILER),
+      ...circuitBreakerFeedItems,
+    ],
     resultCard: await renderResultCard({
       cartUrl,
       results,
@@ -638,6 +703,27 @@ export function createDiscoveryOnlyRetailerFeedItem(retailer) {
     retailer,
     title: `${normalizeNonEmptyString(retailer, "retailer")} in discovery-only mode`,
   });
+}
+
+export function createShoppingActionCapState(overrides = {}) {
+  const conversationActionCount = overrides.conversationActionCount ?? 0;
+  const retailers = overrides.retailers ?? {};
+  if (!retailers || typeof retailers !== "object" || Array.isArray(retailers)) {
+    throw new TypeError("action cap retailers must be an object.");
+  }
+
+  return {
+    conversationActionCount: normalizeNonNegativeInteger(
+      conversationActionCount,
+      "conversationActionCount",
+    ),
+    retailers: Object.fromEntries(
+      Object.entries(retailers).map(([retailer, entry]) => [
+        normalizeNonEmptyString(retailer, "retailer"),
+        normalizeRetailerActionCapEntry(entry, retailer),
+      ]),
+    ),
+  };
 }
 
 export function detectShoppingIntent(message) {
@@ -1068,6 +1154,130 @@ function createStagingResultFeedItems(results, retailer) {
   return feedItems;
 }
 
+function checkShoppingActionCaps(state, retailer, requestedActions, { now = new Date() } = {}) {
+  const normalizedRetailer = normalizeNonEmptyString(retailer, "retailer");
+  const actionCount = normalizeNonNegativeInteger(requestedActions, "requestedActions");
+  if (actionCount === 0) {
+    return undefined;
+  }
+
+  const timestamp = normalizeTimestamp(now, "now");
+  const activeRetailerActions = getActiveRetailerActionTimestamps(
+    state,
+    normalizedRetailer,
+    timestamp,
+  );
+  const conversationTotal = state.conversationActionCount + actionCount;
+  if (conversationTotal > MAX_STAGING_ACTIONS_PER_CONVERSATION) {
+    return {
+      cap: "conversation",
+      currentCount: state.conversationActionCount,
+      limit: MAX_STAGING_ACTIONS_PER_CONVERSATION,
+      message:
+        `Staging cap reached: this conversation can stage up to ${MAX_STAGING_ACTIONS_PER_CONVERSATION} items. Start a new conversation before staging more items.`,
+      requestedActions: actionCount,
+    };
+  }
+
+  const retailerTotal = activeRetailerActions.length + actionCount;
+  if (retailerTotal > MAX_STAGING_ACTIONS_PER_RETAILER_PER_DAY) {
+    return {
+      cap: "retailer_24h",
+      currentCount: activeRetailerActions.length,
+      limit: MAX_STAGING_ACTIONS_PER_RETAILER_PER_DAY,
+      message:
+        `${normalizedRetailer} has reached the staging cap of ${MAX_STAGING_ACTIONS_PER_RETAILER_PER_DAY} items in 24 hours. Try again later or open the products manually.`,
+      requestedActions: actionCount,
+      retailer: normalizedRetailer,
+    };
+  }
+
+  return undefined;
+}
+
+function createStagingCapBlockedResult({
+  action,
+  actionCapState,
+  cartUrl,
+  circuitBreakerState,
+  message,
+  retailer,
+  totalSelected,
+  violation,
+}) {
+  return {
+    action,
+    actionCapState,
+    capViolation: violation,
+    cartUrl,
+    circuitBreakerState,
+    feedItems: [],
+    message,
+    plainText: message,
+    resultCard: {
+      message,
+      retailer,
+      type: "plain_text",
+    },
+    results: [],
+    stagedCount: 0,
+    totalSelected,
+  };
+}
+
+function recordShoppingStagingActions(state, retailer, actionCount, { now = new Date() } = {}) {
+  const normalizedState = createShoppingActionCapState(state);
+  const normalizedRetailer = normalizeNonEmptyString(retailer, "retailer");
+  const count = normalizeNonNegativeInteger(actionCount, "actionCount");
+  if (count === 0) {
+    return normalizedState;
+  }
+
+  const timestamp = normalizeTimestamp(now, "now");
+  const activeTimestamps = getActiveRetailerActionTimestamps(
+    normalizedState,
+    normalizedRetailer,
+    timestamp,
+  );
+  return {
+    conversationActionCount: normalizedState.conversationActionCount + count,
+    retailers: {
+      ...normalizedState.retailers,
+      [normalizedRetailer]: {
+        stagedAt: [
+          ...activeTimestamps,
+          ...Array.from({ length: count }, () => timestamp),
+        ],
+      },
+    },
+  };
+}
+
+function getActiveRetailerActionTimestamps(state, retailer, now) {
+  const normalizedRetailer = normalizeNonEmptyString(retailer, "retailer");
+  const nowMs = new Date(normalizeTimestamp(now, "now")).getTime();
+  const entry = normalizeRetailerActionCapEntry(
+    state.retailers[normalizedRetailer] ?? { stagedAt: [] },
+    normalizedRetailer,
+  );
+  return entry.stagedAt.filter(
+    (timestamp) => nowMs - new Date(timestamp).getTime() < SHOPPING_ACTION_CAP_WINDOW_MS,
+  );
+}
+
+function normalizeRetailerActionCapEntry(entry, retailer) {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    throw new TypeError(`${retailer} action cap entry must be an object.`);
+  }
+  const stagedAt = entry.stagedAt ?? [];
+  if (!Array.isArray(stagedAt)) {
+    throw new TypeError(`${retailer} action cap stagedAt must be an array.`);
+  }
+  return {
+    stagedAt: stagedAt.map((timestamp) => normalizeTimestamp(timestamp, "stagedAt")),
+  };
+}
+
 function findFirstStagingFailure(results) {
   if (!Array.isArray(results)) {
     return undefined;
@@ -1161,7 +1371,7 @@ function normalizeRetailerCandidates(candidates) {
   if (!Array.isArray(candidates)) {
     throw new TypeError("retailer search candidates must be an array.");
   }
-  return candidates.slice(0, 3);
+  return candidates.slice(0, MAX_PROPOSAL_CANDIDATES_PER_RETAILER);
 }
 
 function normalizeRetailerScore(value, candidates, confidence) {
@@ -1291,6 +1501,14 @@ function normalizeNonNegativeInteger(value, field) {
     throw new TypeError(`${field} must be a non-negative integer.`);
   }
   return value;
+}
+
+function normalizeTimestamp(value, field) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw new TypeError(`${field} must be a valid date or ISO timestamp.`);
+  }
+  return date.toISOString();
 }
 
 function normalizeUrl(value, field) {
