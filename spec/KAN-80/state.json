@@ -1,0 +1,11 @@
+{
+  "ticket_id": "KAN-80",
+  "run_count": 1,
+  "kind": "pr",
+  "branch": "tdf/kan-80",
+  "last_session_id": "",
+  "prev_session_id": null,
+  "last_run_at": "2026-05-09T16:21:58.457Z",
+  "last_conclusion": "unknown",
+  "last_kind": "pr"
+}
