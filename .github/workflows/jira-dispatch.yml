@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   handle:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, dark-factory]
     timeout-minutes: 30
     env:
       ISSUE_KEY: ${{ github.event.client_payload.issue_key || github.event.inputs.issue_key }}
@@ -46,49 +46,46 @@ jobs:
           JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
         run: node .github/scripts/jira-dispatch.mjs prepare-dispatch
 
-      - name: Restore Claude session cache
+      - name: Run Codex
         if: env.SHOULD_RUN == 'true'
-        id: cache-restore
-        uses: actions/cache/restore@v4
-        with:
-          path: ~/.claude/projects
-          key: tdf-claude-${{ env.ISSUE_KEY }}-${{ github.run_id }}
-          restore-keys: |
-            tdf-claude-${{ env.ISSUE_KEY }}-
-
-      - name: Show cache restore result
-        if: env.SHOULD_RUN == 'true'
+        id: codex
+        shell: bash
         run: |
-          echo "cache-hit: ${{ steps.cache-restore.outputs.cache-hit }}"
-          echo "matched-key: ${{ steps.cache-restore.outputs.cache-matched-key }}"
-          ls -la "$HOME/.claude/projects" || true
+          set -uo pipefail
+          mkdir -p "$RUN_DIR"
+          last_msg="$RUN_DIR/last_message.txt"
+          events_log="$RUN_DIR/events.jsonl"
+          : > "$last_msg"
+          : > "$events_log"
 
-      - name: Run Claude Code
-        if: env.SHOULD_RUN == 'true'
-        id: claude
-        uses: anthropics/claude-code-base-action@main
-        with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          settings: |
-            { "model": "opus", "effortLevel": "high" }
-          prompt_file: ${{ env.PROMPT_FILE }}
-          claude_args: ${{ env.CLAUDE_ARGS }}
+          codex exec \
+            --json \
+            --skip-git-repo-check \
+            --output-last-message "$last_msg" \
+            --dangerously-bypass-approvals-and-sandbox \
+            --cd "$GITHUB_WORKSPACE" \
+            - < "$PROMPT_FILE" 2>&1 | tee "$events_log"
+          rc=${PIPESTATUS[0]}
+
+          if [ "$rc" -eq 0 ]; then
+            echo "CONCLUSION=success" >> "$GITHUB_ENV"
+          else
+            echo "CONCLUSION=failure" >> "$GITHUB_ENV"
+          fi
+          echo "EXECUTION_FILE=$events_log" >> "$GITHUB_ENV"
+          echo "LAST_MESSAGE_FILE=$last_msg" >> "$GITHUB_ENV"
+          # Always exit 0; final-status step decides overall workflow outcome.
+          exit 0
 
       - name: Record run outputs
         if: env.SHOULD_RUN == 'true'
         env:
           GITHUB_RUN_ID: ${{ github.run_id }}
-          ACTION_SESSION_ID: ${{ steps.claude.outputs.session_id }}
-          CONCLUSION: ${{ steps.claude.outputs.conclusion }}
-          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+          ACTION_SESSION_ID: ""
+          CONCLUSION: ${{ env.CONCLUSION }}
+          EXECUTION_FILE: ${{ env.EXECUTION_FILE }}
+          LAST_MESSAGE_FILE: ${{ env.LAST_MESSAGE_FILE }}
         run: node .github/scripts/jira-dispatch.mjs record-run
-
-      - name: Save Claude session cache
-        if: env.SHOULD_RUN == 'true' && env.NEW_SESSION_ID != ''
-        uses: actions/cache/save@v4
-        with:
-          path: ~/.claude/projects
-          key: tdf-claude-${{ env.ISSUE_KEY }}-${{ github.run_id }}
 
       - name: Commit changes
         if: env.SHOULD_RUN == 'true'
@@ -111,3 +108,13 @@ jobs:
           JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
           JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
         run: node .github/scripts/jira-dispatch.mjs comment-result
+
+      - name: Final status
+        if: env.SHOULD_RUN == 'true'
+        shell: bash
+        run: |
+          if [ "${CONCLUSION:-failure}" != "success" ]; then
+            echo "Codex run concluded as ${CONCLUSION:-failure}; failing the workflow."
+            exit 1
+          fi
+          echo "Codex run succeeded."

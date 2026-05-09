@@ -284,11 +284,6 @@ async function prepareDispatch() {
   });
   await writeFile(promptFile, prompt, "utf8");
 
-  let claudeArgs = "--max-turns 60 --permission-mode bypassPermissions";
-  if (lastSessionId) claudeArgs += ` --resume ${lastSessionId}`;
-
-  await mkdir(`${requireEnv("HOME")}/.claude/projects`, { recursive: true });
-
   await appendGithubEnv({
     SHOULD_RUN: "true",
     ISSUE_KEY: key,
@@ -306,7 +301,6 @@ async function prepareDispatch() {
     RESPONSE_FILE: responseFile,
     RUN_DIR: runDir,
     PROMPT_FILE: promptFile,
-    CLAUDE_ARGS: claudeArgs,
   });
 
   console.log(`Prepared dispatch for ${key} (kind=${kind} new=${isNew} last_session=${lastSessionId || "<none>"})`);
@@ -324,10 +318,24 @@ async function recordRun() {
   const lastSessionId = env.LAST_SESSION_ID || "";
   const actionSessionId = env.ACTION_SESSION_ID || "";
   const executionFile = env.EXECUTION_FILE || "";
+  const lastMessageFile = env.LAST_MESSAGE_FILE || "";
 
   let newSessionId = actionSessionId;
   let assistantText = "";
 
+  // Codex path: --output-last-message gives us the final assistant message
+  // as plain text. Prefer it when available.
+  if (lastMessageFile && (await pathExists(lastMessageFile))) {
+    try {
+      const text = await readFile(lastMessageFile, "utf8");
+      if (text.trim()) assistantText = text;
+    } catch (err) {
+      console.warn(`Failed to read last_message_file: ${err.message}`);
+    }
+  }
+
+  // Claude path (or Codex --json events): parse for session_id and, if we
+  // didn't already have an assistantText, the last assistant text content.
   if (executionFile && (await pathExists(executionFile))) {
     try {
       const raw = await readFile(executionFile, "utf8");
@@ -337,11 +345,13 @@ async function recordRun() {
           if (e?.session_id) newSessionId = e.session_id;
         }
       }
-      for (const e of entries) {
-        if (e?.type === "assistant") {
-          for (const part of e?.message?.content ?? []) {
-            if (part?.type === "text" && typeof part.text === "string") {
-              assistantText = part.text;
+      if (!assistantText) {
+        for (const e of entries) {
+          if (e?.type === "assistant") {
+            for (const part of e?.message?.content ?? []) {
+              if (part?.type === "text" && typeof part.text === "string") {
+                assistantText = part.text;
+              }
             }
           }
         }
@@ -440,7 +450,7 @@ function commitChanges() {
       console.log("No changes to commit on PR branch");
       return appendGithubEnv({ COMMITTED: "false" });
     }
-    sh(`git commit -m "${issueKey}: claude-code update (run ${runId})"`);
+    sh(`git commit -m "${issueKey}: codex update (run ${runId})"`);
     sh(`git push origin "HEAD:${branchName}"`);
     return appendGithubEnv({ COMMITTED: "true" });
   }
@@ -498,7 +508,7 @@ async function ensurePr() {
 
   if (!prUrl) {
     const body = [
-      `Automated Claude Code update for ${issueKey}.`,
+      `Automated Codex update for ${issueKey}.`,
       "",
       `Jira: ${env.JIRA_ISSUE_URL || ""}`,
       `Ticket folder: \`${env.TICKET_FOLDER || ""}\``,
@@ -542,7 +552,7 @@ async function commentResult() {
   const content = [];
 
   if (kind === "pr") {
-    content.push(paragraph(`[TDF-bot] Claude Code processed ${issueKey} (conclusion: ${conclusion}).`));
+    content.push(paragraph(`[TDF-bot] Codex processed ${issueKey} (conclusion: ${conclusion}).`));
     if (branchName && repo) {
       content.push(linkParagraph("Branch", `https://github.com/${repo}/tree/${encodeURIComponent(branchName)}`));
     }
@@ -555,7 +565,7 @@ async function commentResult() {
       if (text) content.push(...markdownToAdfBlocks(text));
     }
   } else {
-    content.push(paragraph(`[TDF-bot] Claude Code answer for ${issueKey} (conclusion: ${conclusion}):`));
+    content.push(paragraph(`[TDF-bot] Codex answer for ${issueKey} (conclusion: ${conclusion}):`));
     if (responseFile && (await pathExists(responseFile))) {
       const text = (await readFile(responseFile, "utf8")).trim();
       if (text) content.push(...markdownToAdfBlocks(text));
@@ -668,7 +678,7 @@ function buildPrompt({ key, summary, ticketFolder, kind, isNew, specFile, planFi
   return [
     `You are running inside \`${env.GITHUB_REPOSITORY}\` for Jira ticket \`${key}: ${summary}\`.`,
     "",
-    "Read `CLAUDE.md` for repository conventions before touching files.",
+    "Read `AGENTS.md` for repository conventions before touching files.",
     "",
     `Ticket folder: \`${ticketFolder}\`.`,
     `- \`${specFile}\`: a fresh snapshot of the Jira ticket and its comments. Read it. Do not edit it.`,
