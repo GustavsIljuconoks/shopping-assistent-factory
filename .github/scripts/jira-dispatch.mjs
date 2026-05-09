@@ -318,7 +318,7 @@ async function prepareDispatch() {
   });
   await appendGithubOutput({ should_run: "true", kind });
 
-  const agentLabel = (env.AGENT_BACKEND || "claude").toLowerCase();
+  const agentLabel = (env.AGENT_BACKEND || "codex").toLowerCase();
   console.log(
     `Prepared dispatch for ${key} (kind=${kind} new=${isNew} last_session=${lastSessionId || "<none>"} agent=${agentLabel})`,
   );
@@ -411,7 +411,7 @@ async function recordRun() {
   const block = [
     "",
     `## Run ${now}`,
-    `- agent_backend: ${env.AGENT_BACKEND || "claude"}`,
+    `- agent_backend: ${env.AGENT_BACKEND || "codex"}`,
     `- run_kind: ${isNew ? "new" : "continuation"}`,
     `- prev_session_id: ${lastSessionId || "<none>"}`,
     `- new_session_id: ${newSessionId || "<none>"}`,

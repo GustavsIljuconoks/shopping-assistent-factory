@@ -7,7 +7,7 @@ name: Handle Jira Manual Trigger
 #    GitHub → repo → Settings → Secrets and variables → Actions → Variables
 #    (Must be a *repository* variable. Values only on an *Environment* are NOT
 #    visible unless this job sets `environment:` to that environment.)
-# 4) claude
+# 4) codex (matches self-hosted Dark Factory: Codex on PATH per AGENTS.md)
 #
 # Required secrets per backend:
 #   claude  → CLAUDE_CODE_OAUTH_TOKEN (anthropics/claude-code-base-action)
@@ -30,7 +30,7 @@ on:
         description: "Coding agent to run for this ticket"
         type: choice
         required: true
-        default: claude
+        default: codex
         options:
           - claude
           - codex
@@ -100,8 +100,8 @@ jobs:
             chosen="$v"
             source="vars.TDF_AGENT_BACKEND (repository Actions variable)"
           else
-            chosen="claude"
-            source="default (set none of the above)"
+            chosen="codex"
+            source="default (no dispatch/input/vars.TDF_AGENT_BACKEND)"
           fi
 
           echo "AGENT_BACKEND=$chosen" >> "$GITHUB_ENV"
