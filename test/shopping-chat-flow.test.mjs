@@ -109,6 +109,95 @@ test("uses profile size and budget before dispatching search and rendering a pro
   assert.deepEqual(result.proposalCard, { type: "proposal_card", itemId: "asket-shirt-1" });
 });
 
+test("searches enabled retailers in parallel and assembles sorted non-empty proposal cards", async () => {
+  const started = [];
+  const incrementalCards = [];
+  const gates = new Map([
+    ["Slow Retailer", createDeferred()],
+    ["Fast Retailer", createDeferred()],
+    ["Empty Retailer", createDeferred()],
+  ]);
+
+  const pending = handleShoppingChatMessage({
+    chat: {
+      async showProposalCard(card, payload) {
+        incrementalCards.push([card.retailer, payload.retailerResult.candidates.length]);
+      },
+    },
+    message: "Find black shirt",
+    profile: {
+      country: "LV",
+      currency: "EUR",
+      enabledRetailers: ["Slow Retailer", "Fast Retailer", "Empty Retailer"],
+      sizes: {
+        shoes: { value: "42", system: "EU" },
+        tops: { value: "M", system: "International" },
+      },
+      budgetAnchors: {
+        default: { amount: 100, currency: "EUR", cadence: "per_item" },
+      },
+    },
+    searchTool: {
+      async search(context) {
+        started.push(context.retailer);
+        return gates.get(context.retailer).promise;
+      },
+    },
+    async renderProposalCard(searchResult) {
+      return {
+        retailer: searchResult.retailer,
+        type: searchResult.type ?? "retailer_proposal_card",
+      };
+    },
+  });
+
+  await Promise.resolve();
+  assert.deepEqual(started, ["Slow Retailer", "Fast Retailer", "Empty Retailer"]);
+
+  gates.get("Fast Retailer").resolve({
+    retailer: "Fast Retailer",
+    confidence: 0.81,
+    overallMatchScore: 72,
+    candidates: [createSearchCandidate("fast-1")],
+  });
+  await flushAsyncWork();
+  assert.deepEqual(incrementalCards, [["Fast Retailer", 1]]);
+
+  gates.get("Empty Retailer").resolve({
+    retailer: "Empty Retailer",
+    confidence: 0.95,
+    overallMatchScore: 99,
+    candidates: [],
+  });
+  gates.get("Slow Retailer").resolve({
+    retailer: "Slow Retailer",
+    confidence: 0.9,
+    overallMatchScore: 88,
+    candidates: [
+      createSearchCandidate("slow-1"),
+      createSearchCandidate("slow-2"),
+      createSearchCandidate("slow-3"),
+      createSearchCandidate("slow-4"),
+    ],
+  });
+
+  const result = await pending;
+
+  assert.equal(result.action, "proposal_card");
+  assert.deepEqual(
+    result.searchResult.cards.map((card) => [card.retailer, card.candidates.length, card.overallMatchScore]),
+    [
+      ["Slow Retailer", 3, 88],
+      ["Fast Retailer", 1, 72],
+    ],
+  );
+  assert.equal(result.searchResult.confidence, 0.9);
+  assert.deepEqual(incrementalCards, [
+    ["Fast Retailer", 1],
+    ["Slow Retailer", 3],
+  ]);
+});
+
 test("asks lazy bootstrap questions for the first missing shopping profile field", async () => {
   const events = [];
   const result = await handleShoppingChatMessage({
@@ -541,4 +630,25 @@ function failSearchTool() {
       throw new Error("search should not be called");
     },
   };
+}
+
+function createDeferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, reject, resolve };
+}
+
+function createSearchCandidate(id) {
+  return {
+    id,
+    title: id,
+  };
+}
+
+function flushAsyncWork() {
+  return new Promise((resolve) => setImmediate(resolve));
 }
