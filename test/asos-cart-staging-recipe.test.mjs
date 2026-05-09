@@ -155,6 +155,38 @@ test("returns login_expired before size selection when ASOS redirects to login",
   );
 });
 
+test("pauses for an ASOS anti-bot handoff and returns an error when it times out", async () => {
+  const selectors = createAsosCartStagingSelectors("M");
+  const page = new FakePage({
+    evaluateResult: true,
+    locators: {
+      [selectors.size[0]]: { visible: true },
+      [selectors.addToCart[0]]: { visible: true },
+    },
+  });
+  const handoffs = [];
+
+  const result = await stageAsosCartItem({
+    audit: captureAudit(),
+    browserRun: {
+      async waitForUserAction(payload) {
+        handoffs.push(payload.reason);
+        throw new Error("Timed out waiting for ASOS cloudflare challenge to be resolved.");
+      },
+    },
+    flushAudit: undefined,
+    page,
+    productUrl: "https://www.asos.com/product.html",
+    selectors,
+    size: "M",
+  });
+
+  assert.equal(result.status, "error");
+  assert.match(result.error, /Timed out waiting for ASOS cloudflare challenge/);
+  assert.deepEqual(handoffs, ["cloudflare"]);
+  assert.deepEqual(page.events, [["goto", "https://www.asos.com/product.html"], ["evaluate"]]);
+});
+
 test("returns error when the requested ASOS size control is missing", async () => {
   const selectors = createAsosCartStagingSelectors("XS");
   const page = new FakePage();
@@ -185,9 +217,15 @@ function captureAudit(target = []) {
 }
 
 class FakePage {
-  constructor({ locators = {} } = {}) {
+  constructor({ evaluateResult, locators = {} } = {}) {
     this.events = [];
     this.locators = locators;
+    if (evaluateResult !== undefined) {
+      this.evaluate = async () => {
+        this.events.push(["evaluate"]);
+        return evaluateResult;
+      };
+    }
   }
 
   async goto(url) {
