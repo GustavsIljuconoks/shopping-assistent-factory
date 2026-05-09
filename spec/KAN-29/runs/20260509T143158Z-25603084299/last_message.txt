@@ -1,0 +1,9 @@
+Validated KAN-29 on the current checkout. The Asket product search implementation is already present and merged on `main`, with plan and Jira response already written.
+
+Verification passed:
+- `node --check src/asket-product-search.mjs`
+- `node --check test/asket-product-search.test.mjs`
+- `node --test test/asket-product-search.test.mjs`
+- `node --test test/*.test.mjs` passed, 45/45
+
+I did not switch branches or make new code changes. Current dirty state is limited to workflow-generated ticket artifacts: `spec/KAN-29/spec.md` and the new `spec/KAN-29/runs/20260509T143158Z-25603084299/` directory.
