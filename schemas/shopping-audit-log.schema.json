@@ -21,7 +21,7 @@
     "actionType": {
       "description": "Retailer action Bestfriend attempted or completed.",
       "type": "string",
-      "enum": ["search", "page_read", "cart_add", "cart_peek"]
+      "enum": ["search", "page_read", "size_select", "cart_add", "cart_peek"]
     },
     "retailer": {
       "description": "Retailer account or site the action targeted.",
