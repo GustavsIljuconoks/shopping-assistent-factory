@@ -3,6 +3,8 @@ import { dirname, resolve } from "node:path";
 
 export const SHOPPING_PROFILE_SCHEMA_VERSION = 1;
 export const DEFAULT_SHOPPING_PROFILE_PATH = "data/shopping-profile.json";
+export const SHOPPING_MEMORY_TAG = "Shopping";
+export const SHOPPING_MEMORY_SENTIMENTS = Object.freeze(["positive", "negative", "neutral"]);
 
 export function createDefaultShoppingProfile(overrides = {}) {
   return normalizeShoppingProfile({
@@ -13,6 +15,7 @@ export function createDefaultShoppingProfile(overrides = {}) {
     hardExclusions: [],
     perItemPriceCeiling: { amount: 0, currency: "EUR" },
     enabledRetailers: [],
+    memories: [],
     ...overrides,
   });
 }
@@ -74,7 +77,137 @@ export function normalizeShoppingProfile(profile) {
     hardExclusions: normalizeUniqueStringArray(profile.hardExclusions, "hardExclusions"),
     perItemPriceCeiling,
     enabledRetailers: normalizeUniqueStringArray(profile.enabledRetailers, "enabledRetailers"),
+    memories: normalizeMemories(profile.memories ?? []),
   };
+}
+
+export function createShoppingMemory(memory, now = new Date()) {
+  const normalized = normalizeMemory(
+    {
+      ...memory,
+      tags: ensureShoppingTag(memory?.tags),
+      type: memory?.type ?? "shopping_outcome",
+      timestamp: memory?.timestamp ?? now,
+    },
+    "memory",
+  );
+
+  return {
+    ...normalized,
+    tags: ensureShoppingTag(normalized.tags),
+  };
+}
+
+export async function addShoppingMemory(
+  memory,
+  filePath = DEFAULT_SHOPPING_PROFILE_PATH,
+  options = {},
+) {
+  const current = await readShoppingProfile(filePath);
+  const nextMemory = createShoppingMemory(memory, options.now);
+  const next = normalizeShoppingProfile({
+    ...current,
+    memories: [...current.memories, nextMemory],
+  });
+  await writeShoppingProfile(next, filePath);
+  return nextMemory;
+}
+
+export async function updateShoppingMemory(
+  memoryId,
+  patch,
+  filePath = DEFAULT_SHOPPING_PROFILE_PATH,
+) {
+  const id = normalizeNonEmptyString(memoryId, "memoryId");
+  if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
+    throw new TypeError("memory patch must be an object.");
+  }
+
+  const current = await readShoppingProfile(filePath);
+  const nextMemories = current.memories.map((memory) => {
+    if (memory.id !== id) {
+      return memory;
+    }
+    return normalizeMemory(
+      {
+        ...memory,
+        ...patch,
+        id: memory.id,
+        tags: isShoppingMemory(memory)
+          ? ensureShoppingTag(patch.tags ?? memory.tags)
+          : (patch.tags ?? memory.tags),
+        timestamp: patch.timestamp ?? memory.timestamp,
+      },
+      "memory",
+    );
+  });
+  const next = normalizeShoppingProfile({ ...current, memories: nextMemories });
+  await writeShoppingProfile(next, filePath);
+  return next.memories.find((memory) => memory.id === id);
+}
+
+export async function pinShoppingMemory(
+  memoryId,
+  pinned,
+  filePath = DEFAULT_SHOPPING_PROFILE_PATH,
+) {
+  return updateShoppingMemory(memoryId, { pinned: Boolean(pinned) }, filePath);
+}
+
+export async function wipeShoppingMemory(memoryId, filePath = DEFAULT_SHOPPING_PROFILE_PATH) {
+  const id = normalizeNonEmptyString(memoryId, "memoryId");
+  const current = await readShoppingProfile(filePath);
+  const next = normalizeShoppingProfile({
+    ...current,
+    memories: current.memories.filter((memory) => memory.id !== id),
+  });
+  await writeShoppingProfile(next, filePath);
+  return next.memories;
+}
+
+export async function clearShoppingMemories(filePath = DEFAULT_SHOPPING_PROFILE_PATH) {
+  const current = await readShoppingProfile(filePath);
+  const next = normalizeShoppingProfile({
+    ...current,
+    memories: current.memories.filter((memory) => !isShoppingMemory(memory)),
+  });
+  await writeShoppingProfile(next, filePath);
+  return next.memories;
+}
+
+export async function recordShoppingOutcomeMemory(
+  {
+    candidate,
+    feedback,
+    outcome,
+    sentiment,
+    source = "staging_feedback",
+  } = {},
+  filePath = DEFAULT_SHOPPING_PROFILE_PATH,
+  options = {},
+) {
+  const normalizedFeedback = normalizeNonEmptyString(feedback, "feedback");
+  const normalizedOutcome =
+    outcome === undefined ? "feedback" : normalizeNonEmptyString(outcome, "outcome");
+  const normalizedCandidate =
+    candidate === undefined ? undefined : normalizeMemorySubject(candidate, "candidate");
+  const resolvedSentiment = sentiment ?? inferOutcomeSentiment(normalizedOutcome, normalizedFeedback);
+
+  return addShoppingMemory(
+    {
+      content: normalizedFeedback,
+      sentiment: resolvedSentiment,
+      source,
+      subject: normalizedCandidate,
+      outcome: normalizedOutcome,
+    },
+    filePath,
+    options,
+  );
+}
+
+export function isShoppingMemory(memory) {
+  return Array.isArray(memory?.tags) && memory.tags.includes(SHOPPING_MEMORY_TAG);
 }
 
 function normalizeCode(value, field, length) {
@@ -176,4 +309,107 @@ function normalizeUniqueStringArray(value, field) {
     }
     return item.trim();
   }))];
+}
+
+function normalizeMemories(value) {
+  if (!Array.isArray(value)) {
+    throw new TypeError("memories must be an array.");
+  }
+  return value.map((memory, index) => normalizeMemory(memory, `memories[${index}]`));
+}
+
+function normalizeMemory(memory, field) {
+  if (!memory || typeof memory !== "object" || Array.isArray(memory)) {
+    throw new TypeError(`${field} must be an object.`);
+  }
+
+  const normalized = {
+    id: normalizeMemoryId(memory.id),
+    content: normalizeNonEmptyString(memory.content ?? memory.text, `${field}.content`),
+    pinned: Boolean(memory.pinned),
+    sentiment: normalizeEnum(
+      memory.sentiment ?? "neutral",
+      `${field}.sentiment`,
+      SHOPPING_MEMORY_SENTIMENTS,
+    ),
+    tags: normalizeUniqueStringArray(memory.tags ?? [], `${field}.tags`),
+    timestamp: normalizeTimestamp(memory.timestamp ?? new Date()),
+    type: normalizeNonEmptyString(memory.type ?? "note", `${field}.type`),
+  };
+
+  if (memory.source !== undefined) {
+    normalized.source = normalizeNonEmptyString(memory.source, `${field}.source`);
+  }
+  if (memory.outcome !== undefined) {
+    normalized.outcome = normalizeNonEmptyString(memory.outcome, `${field}.outcome`);
+  }
+  if (memory.subject !== undefined) {
+    normalized.subject = normalizeMemorySubject(memory.subject, `${field}.subject`);
+  }
+
+  return normalized;
+}
+
+function normalizeMemorySubject(subject, field) {
+  if (!subject || typeof subject !== "object" || Array.isArray(subject)) {
+    throw new TypeError(`${field} must be an object.`);
+  }
+
+  const normalized = {};
+  for (const key of ["brand", "title", "color", "size", "productUrl", "retailer", "category"]) {
+    if (subject[key] !== undefined) {
+      normalized[key] = normalizeNonEmptyString(subject[key], `${field}.${key}`);
+    }
+  }
+  if (Array.isArray(subject.tags)) {
+    normalized.tags = normalizeUniqueStringArray(subject.tags, `${field}.tags`);
+  }
+  if (Object.keys(normalized).length === 0) {
+    throw new TypeError(`${field} must include at least one searchable field.`);
+  }
+  return normalized;
+}
+
+function normalizeMemoryId(value) {
+  if (value !== undefined) {
+    return normalizeNonEmptyString(value, "memory id");
+  }
+  return `mem-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function normalizeNonEmptyString(value, field) {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new TypeError(`${field} must be a non-empty string.`);
+  }
+  return value.trim();
+}
+
+function normalizeEnum(value, field, allowedValues) {
+  if (!allowedValues.includes(value)) {
+    throw new TypeError(`${field} must be one of: ${allowedValues.join(", ")}.`);
+  }
+  return value;
+}
+
+function normalizeTimestamp(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw new TypeError("timestamp must be a valid date or ISO timestamp.");
+  }
+  return date.toISOString();
+}
+
+function ensureShoppingTag(tags = []) {
+  return normalizeUniqueStringArray([...tags, SHOPPING_MEMORY_TAG], "memory.tags");
+}
+
+function inferOutcomeSentiment(outcome, feedback) {
+  const text = `${outcome} ${feedback}`.toLowerCase();
+  if (/\b(dislike|bad|wrong|returned|return|reject|rejected|avoid|scratchy|poor|failed)\b/.test(text)) {
+    return "negative";
+  }
+  if (/\b(like|liked|good|great|kept|keeper|success|worked|love)\b/.test(text)) {
+    return "positive";
+  }
+  return "neutral";
 }

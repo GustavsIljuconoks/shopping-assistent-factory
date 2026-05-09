@@ -104,6 +104,78 @@ test("filters candidates above the price ceiling and mismatched size or color", 
   );
 });
 
+test("de-prioritizes candidates that match negative Shopping memories", async () => {
+  const results = await searchAsketProducts({
+    intent: SHIRT_INTENT,
+    memories: [
+      {
+        id: "memory-1",
+        content: "Returned the Oxford shirt because the collar was scratchy.",
+        pinned: false,
+        sentiment: "negative",
+        tags: ["Shopping"],
+        timestamp: "2026-05-09T12:00:00.000Z",
+        type: "shopping_outcome",
+        subject: {
+          brand: "Asket",
+          title: "Oxford Shirt",
+          color: "White",
+          size: "M",
+        },
+      },
+    ],
+    products: [
+      product({
+        title: "The Oxford Shirt",
+        color: "White",
+        price: { amount: 95, currency: "EUR" },
+        sizes: ["M"],
+      }),
+      product({
+        title: "The Pique Shirt",
+        color: "White",
+        price: { amount: 95, currency: "EUR" },
+        sizes: ["M"],
+      }),
+    ],
+  });
+
+  assert.deepEqual(
+    results.map((result) => result.title),
+    ["The Pique Shirt", "The Oxford Shirt"],
+  );
+  assert.match(results[1].reasoning, /De-prioritized by Shopping memory\./);
+});
+
+test("ignores non-Shopping memories when ranking", async () => {
+  const results = await searchAsketProducts({
+    intent: SHIRT_INTENT,
+    memories: [
+      {
+        content: "Avoid Oxford shirt",
+        sentiment: "negative",
+        tags: ["General"],
+      },
+    ],
+    products: [
+      product({
+        title: "The Oxford Shirt",
+        color: "White",
+        price: { amount: 95, currency: "EUR" },
+        sizes: ["M"],
+      }),
+      product({
+        title: "The Pique Shirt",
+        color: "White",
+        price: { amount: 95, currency: "EUR" },
+        sizes: ["M"],
+      }),
+    ],
+  });
+
+  assert.equal(results[0].title, "The Oxford Shirt");
+});
+
 test("returns an empty list gracefully when no candidates match", async () => {
   const results = await searchAsketProducts({
     intent: SHIRT_INTENT,

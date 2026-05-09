@@ -15,8 +15,14 @@ export const SETTINGS_SECTIONS = Object.freeze([
     label: "Privacy",
     href: "#privacy",
   },
+  {
+    id: "memories",
+    label: "Memories",
+    href: "#memories",
+  },
 ]);
 
+export const SHOPPING_MEMORY_FILTER_LABEL = "Shopping";
 export const SHOPPING_SETUP_PLACEHOLDER =
   "Shopping preferences are in setup. Profile controls will appear here in a later milestone.";
 export const SHOPPING_ACTIVITY_EMPTY_STATE =
@@ -224,10 +230,46 @@ export function renderSettingsPrivacyPane({ auditEntries = [] } = {}) {
   ].join("\n");
 }
 
+export function renderSettingsMemoriesPane({ memories = [], activeFilter = SHOPPING_MEMORY_FILTER_LABEL } = {}) {
+  const normalizedMemories = normalizeMemories(memories);
+  const filter = normalizeString(activeFilter, "active memory filter");
+  const filteredMemories = normalizedMemories.filter((memory) => memory.tags.includes(filter));
+  const memoryContent =
+    filteredMemories.length === 0
+      ? `<p class="settings-empty-state">No ${escapeHtml(filter)} memories yet.</p>`
+      : [
+          '<div class="settings-memory-list" role="list" tabindex="0" aria-label="Shopping memories" style="max-height: 28rem; overflow-y: auto;">',
+          ...filteredMemories.map((memory) => renderMemoryItem(memory)),
+          "</div>",
+        ].join("\n    ");
+
+  return [
+    '<section id="memories" class="settings-pane" aria-labelledby="memories-heading">',
+    '  <p class="settings-kicker">Settings</p>',
+    '  <h1 id="memories-heading">Memories</h1>',
+    '  <section class="settings-subpane" aria-labelledby="memory-filters-heading">',
+    '    <h2 id="memory-filters-heading">Memory filters</h2>',
+    '    <div class="settings-filter-row" role="group" aria-label="Memory filters">',
+    `      <button type="button" class="settings-filter" aria-pressed="true">${escapeHtml(filter)}</button>`,
+    '    </div>',
+    '  </section>',
+    '  <section class="settings-subpane" aria-labelledby="shopping-memories-heading">',
+    '    <header class="settings-subpane-header">',
+    '      <h2 id="shopping-memories-heading">Shopping memories</h2>',
+    '      <button type="button" class="memory-clear-shopping-button">Clear shopping memories</button>',
+    '    </header>',
+    "    " + memoryContent,
+    "  </section>",
+    "</section>",
+  ].join("\n");
+}
+
 export function renderSettingsApp({
   activeSection = "privacy",
   auditEntries,
   connectedRetailers,
+  memories,
+  memoryFilter,
   profile,
   proposalCards,
 } = {}) {
@@ -243,11 +285,15 @@ export function renderSettingsApp({
     ...SETTINGS_SECTIONS.map((section) => renderSettingsNavLink(section, active)),
     "    </nav>",
     "  </aside>",
-    `  ${
-      active === "shopping"
-        ? renderSettingsShoppingPane({ connectedRetailers, profile, proposalCards }).replaceAll("\n", "\n  ")
-        : renderSettingsPrivacyPane({ auditEntries }).replaceAll("\n", "\n  ")
-    }`,
+    `  ${renderActiveSettingsPane({
+      active,
+      auditEntries,
+      connectedRetailers,
+      memories,
+      memoryFilter,
+      profile,
+      proposalCards,
+    }).replaceAll("\n", "\n  ")}`,
     "</main>",
   ].join("\n");
 }
@@ -344,6 +390,22 @@ function renderRetailerToggle(retailer, enabled) {
     "          </label>",
     "        </li>",
   ].join("\n");
+function renderActiveSettingsPane({
+  active,
+  auditEntries,
+  connectedRetailers,
+  memories,
+  memoryFilter,
+  profile,
+  proposalCards,
+}) {
+  if (active === "shopping") {
+    return renderSettingsShoppingPane({ connectedRetailers, profile, proposalCards });
+  }
+  if (active === "memories") {
+    return renderSettingsMemoriesPane({ memories, activeFilter: memoryFilter });
+  }
+  return renderSettingsPrivacyPane({ auditEntries });
 }
 
 function renderSettingsNavLink(section, activeSection) {
@@ -358,6 +420,36 @@ function renderConnectedRetailer(retailer) {
     `  <span class="connected-retailer-status">${escapeHtml(retailer.statusLabel)}</span>`,
     "</li>",
   ].join("\n      ");
+}
+
+function renderMemoryItem(memory) {
+  const pinned = memory.pinned ? "true" : "false";
+  const tags = memory.tags.map((tag) => `<span class="memory-tag">${escapeHtml(tag)}</span>`).join("");
+  return [
+    `      <article class="settings-memory${memory.pinned ? " settings-memory--pinned" : ""}" role="listitem" data-memory-id="${escapeHtml(memory.id)}">`,
+    '        <header class="settings-memory-header">',
+    "          <div>",
+    `            <p class="settings-memory-meta">${escapeHtml(memory.sentiment)} &middot; ${escapeHtml(memory.timestamp)}</p>`,
+    `            <h3>${escapeHtml(memory.content)}</h3>`,
+    "          </div>",
+    `          <button type="button" class="memory-pin-button" aria-pressed="${pinned}">${memory.pinned ? "Unpin" : "Pin"}</button>`,
+    "        </header>",
+    memory.subject ? renderMemorySubject(memory.subject) : "",
+    `        <div class="settings-memory-tags">${tags}</div>`,
+    '        <footer class="settings-memory-actions">',
+    '          <button type="button" class="memory-edit-button">Edit</button>',
+    '          <button type="button" class="memory-wipe-button">Wipe</button>',
+    "        </footer>",
+    "      </article>",
+  ].filter(Boolean).join("\n");
+}
+
+function renderMemorySubject(subject) {
+  const summary = [subject.brand, subject.title, subject.color, subject.size].filter(Boolean).join(" / ");
+  if (!summary) {
+    return "";
+  }
+  return `        <p class="settings-memory-subject">${escapeHtml(summary)}</p>`;
 }
 
 export function renderRetailerProposalCard(proposal) {
@@ -460,6 +552,49 @@ function normalizeProposalCards(proposalCards) {
   }
 
   return proposalCards.map((proposal) => normalizeProposalCard(proposal));
+}
+
+function normalizeMemories(memories) {
+  if (!Array.isArray(memories)) {
+    throw new TypeError("memories must be an array.");
+  }
+  return memories.map((memory, index) => {
+    if (!memory || typeof memory !== "object" || Array.isArray(memory)) {
+      throw new TypeError(`memories[${index}] must be an object.`);
+    }
+    return {
+      id: normalizeString(memory.id, `memories[${index}].id`),
+      content: normalizeString(memory.content ?? memory.text, `memories[${index}].content`),
+      pinned: Boolean(memory.pinned),
+      sentiment: normalizeString(memory.sentiment ?? "neutral", `memories[${index}].sentiment`),
+      subject: normalizeOptionalSubject(memory.subject, `memories[${index}].subject`),
+      tags: normalizeTags(memory.tags, `memories[${index}].tags`),
+      timestamp: normalizeString(memory.timestamp, `memories[${index}].timestamp`),
+    };
+  }).sort((left, right) => Number(right.pinned) - Number(left.pinned) || right.timestamp.localeCompare(left.timestamp));
+}
+
+function normalizeTags(tags, field) {
+  if (!Array.isArray(tags)) {
+    throw new TypeError(`${field} must be an array.`);
+  }
+  return tags.map((tag) => normalizeString(tag, field));
+}
+
+function normalizeOptionalSubject(subject, field) {
+  if (subject === undefined) {
+    return undefined;
+  }
+  if (!subject || typeof subject !== "object" || Array.isArray(subject)) {
+    throw new TypeError(`${field} must be an object.`);
+  }
+  const normalized = {};
+  for (const key of ["brand", "title", "color", "size", "productUrl", "retailer", "category"]) {
+    if (subject[key] !== undefined) {
+      normalized[key] = normalizeString(subject[key], `${field}.${key}`);
+    }
+  }
+  return normalized;
 }
 
 function normalizeProposalCard(proposal) {

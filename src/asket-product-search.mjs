@@ -1,10 +1,24 @@
 import { ASKET_RETAILER_IDENTIFIER } from "./asket-login-flow.mjs";
 import { VisibleAutomationBrowserRun } from "./automation-browser.mjs";
 import { ensureRetailerBrowserProfile } from "./shopping-browser-profiles.mjs";
+import { SHOPPING_MEMORY_TAG } from "./shopping-profile.mjs";
 
 export { ASKET_RETAILER_IDENTIFIER };
 export const ASKET_SEARCH_URL_BASE = "https://www.asket.com/en-dk/search";
 export const ASKET_PRODUCT_SEARCH_MAX_CANDIDATES = 3;
+const MEMORY_MATCH_STOP_WORDS = Object.freeze([
+  "asket",
+  "because",
+  "black",
+  "blue",
+  "collar",
+  "green",
+  "returned",
+  "shirt",
+  "shirts",
+  "size",
+  "white",
+]);
 
 export async function searchAsketProducts({
   intent,
@@ -17,9 +31,11 @@ export async function searchAsketProducts({
   profilesRoot,
   searchUrlBase = ASKET_SEARCH_URL_BASE,
   maxCandidates = ASKET_PRODUCT_SEARCH_MAX_CANDIDATES,
+  memories = [],
 } = {}) {
   const normalizedIntent = normalizeAsketProductIntent(intent);
   const normalizedMaxCandidates = normalizeMaxCandidates(maxCandidates);
+  const rankingMemories = normalizeRankingMemories(memories);
   const searchUrl = createAsketSearchUrl(normalizedIntent, searchUrlBase);
   const rawProducts =
     products ??
@@ -38,7 +54,7 @@ export async function searchAsketProducts({
     throw new TypeError("Asket product search adapter must return an array.");
   }
 
-  return rankAsketProducts(rawProducts, normalizedIntent)
+  return rankAsketProducts(rawProducts, normalizedIntent, rankingMemories)
     .slice(0, normalizedMaxCandidates)
     .map(({ candidate }) => candidate);
 }
@@ -130,7 +146,7 @@ async function fetchAsketProducts({
   }
 }
 
-function rankAsketProducts(products, intent) {
+function rankAsketProducts(products, intent, memories = []) {
   return products
     .map((product, index) => normalizeAsketProductCandidate(product, intent, index))
     .filter(({ candidate }) => candidate.price.amount <= intent.priceCeiling.amount)
@@ -146,10 +162,10 @@ function rankAsketProducts(products, intent) {
     )
     .map((entry) => ({
       ...entry,
-      score: scoreCandidate(entry, intent),
+      score: scoreCandidate(entry, intent) - shoppingMemoryPenalty(entry, memories),
       candidate: {
         ...entry.candidate,
-        reasoning: createReasoning(entry.candidate, intent),
+        reasoning: createReasoning(entry, intent, memories),
       },
     }))
     .sort((left, right) => right.score - left.score || left.index - right.index);
@@ -234,9 +250,12 @@ function scoreCandidate({ candidate, searchableText, availableSizes }, intent) {
   return score;
 }
 
-function createReasoning(candidate, intent) {
+function createReasoning(entry, intent, memories) {
+  const { candidate } = entry;
   const currency = candidate.price.currency;
-  return `Matches ${intent.garmentClass}, ${intent.colorKeywords.join("/")}, size ${candidate.size} under ${currency} ${intent.priceCeiling.amount}.`;
+  const memoryNote =
+    shoppingMemoryPenalty(entry, memories) > 0 ? " De-prioritized by Shopping memory." : "";
+  return `Matches ${intent.garmentClass}, ${intent.colorKeywords.join("/")}, size ${candidate.size} under ${currency} ${intent.priceCeiling.amount}.${memoryNote}`;
 }
 
 function matchesGarment(searchableText, garmentClass, title) {
@@ -265,6 +284,57 @@ function matchesSize(size, availableSizes, requestedSize) {
 function colorMatchCount(text, colorKeywords) {
   const normalizedText = normalizeSearchText(text);
   return colorKeywords.filter((keyword) => normalizedText.includes(normalizeSearchText(keyword))).length;
+}
+
+function shoppingMemoryPenalty(entry, memories) {
+  const matchedNegativeMemories = memories.filter((memory) =>
+    memory.sentiment === "negative" && memoryMatchesCandidate(memory, entry),
+  );
+  return matchedNegativeMemories.length * 60;
+}
+
+function memoryMatchesCandidate(memory, { candidate, searchableText }) {
+  const memoryText = normalizeSearchText(
+    [
+      memory.content,
+      memory.outcome,
+      memory.subject?.brand,
+      memory.subject?.title,
+      memory.subject?.color,
+      memory.subject?.size,
+      memory.subject?.category,
+      ...(memory.subject?.tags ?? []),
+    ].filter(Boolean).join(" "),
+  );
+  const candidateText = normalizeSearchText(
+    [candidate.brand, candidate.title, candidate.color, candidate.size, searchableText].join(" "),
+  );
+  const terms = memoryText
+    .split(/\s+/)
+    .map((term) => term.replaceAll(/[^a-z0-9]/g, ""))
+    .filter((term) => term.length >= 4 && !MEMORY_MATCH_STOP_WORDS.includes(term));
+  return terms.some((term) => candidateText.includes(term));
+}
+
+function normalizeRankingMemories(memories) {
+  if (memories === undefined) {
+    return [];
+  }
+  if (!Array.isArray(memories)) {
+    throw new TypeError("memories must be an array.");
+  }
+  return memories
+    .filter((memory) => memory && typeof memory === "object" && !Array.isArray(memory))
+    .filter((memory) => Array.isArray(memory.tags) && memory.tags.includes(SHOPPING_MEMORY_TAG))
+    .map((memory) => ({
+      content: typeof memory.content === "string" ? memory.content : "",
+      outcome: typeof memory.outcome === "string" ? memory.outcome : "",
+      sentiment: typeof memory.sentiment === "string" ? memory.sentiment : "neutral",
+      subject:
+        memory.subject && typeof memory.subject === "object" && !Array.isArray(memory.subject)
+          ? memory.subject
+          : undefined,
+    }));
 }
 
 async function openSearchPage(session, searchUrl) {
