@@ -44,6 +44,7 @@ export const DEFAULT_RETAILERS = Object.freeze([
   "Zalando",
   "ASOS",
   "About You",
+  "H&M.lv",
   "Uniqlo",
 ]);
 
