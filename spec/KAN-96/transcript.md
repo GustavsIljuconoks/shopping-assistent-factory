@@ -1,0 +1,22 @@
+# KAN-96 Transcript
+
+## Run 2026-05-09T18:41:31.198Z
+- agent_backend: codex
+- run_kind: new
+- prev_session_id: <none>
+- new_session_id: <none>
+- session_id_rotated: false
+- conclusion: success
+- run_dir: spec/KAN-96/runs/20260509T183800Z-25608420216
+- assistant_summary:
+  Implemented KAN-96.
+  
+  Added [src/shopping-data-wipe.mjs](/Users/cube/actions-runner/GustavsIljuconoks-shopping-assistent-factory/_work/shopping-assistent-factory/shopping-assistent-factory/src/shopping-data-wipe.mjs) with a composable `wipeShoppingData()` entry point that clears shopping profile data, staged carts, audit activity, retailer browser profiles/sessions, Shopping-tagged memories, and shopping conversation context while preserving non-shopping memories.
+  
+  Added focused coverage in [test/shopping-data-wipe.test.mjs](/Users/cube/actions-runner/GustavsIljuconoks-shopping-assistent-factory/_work/shopping-assistent-factory/shopping-assistent-factory/test/shopping-data-wipe.test.mjs), updated [plan.md](/Users/cube/actions-runner/GustavsIljuconoks-shopping-assistent-factory/_work/shopping-assistent-factory/shopping-assistent-factory/spec/KAN-96/plan.md), and wrote [response.md](/Users/cube/actions-runner/GustavsIljuconoks-shopping-assistent-factory/_work/shopping-assistent-factory/shopping-assistent-factory/spec/KAN-96/response.md).
+  
+  Verification passed:
+  - `node --check src/shopping-data-wipe.mjs`
+  - `node --check test/shopping-data-wipe.test.mjs`
+  - `node --test test/shopping-data-wipe.test.mjs`
+  - `node --test test/shopping-profile.test.mjs test/shopping-audit-log.test.mjs test/shopping-browser-profiles.test.mjs test/shopping-active-carts-strip.test.mjs test/settings-shopping-pane.test.mjs test/shopping-data-wipe.test.mjs`
