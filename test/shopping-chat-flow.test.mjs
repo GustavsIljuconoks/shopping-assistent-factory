@@ -2,11 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  ASKET_CART_URL,
   SHOPPING_CHAT_LOW_CONFIDENCE_MESSAGE,
   createProfileConfirmationCard,
   detectShoppingIntent,
   findMissingBootstrapField,
   handleShoppingChatMessage,
+  renderAsketStagingResultCard,
+  stageSelectedAsketCandidates,
 } from "../src/shopping-chat-flow.mjs";
 
 test("detects shopping intent in a garment request", () => {
@@ -268,6 +271,134 @@ test("does not render a proposal card for low-confidence search results", async 
   assert.equal(result.reason, "low_confidence");
   assert.equal(rendered, false);
   assert.deepEqual(events, [[SHOPPING_CHAT_LOW_CONFIDENCE_MESSAGE, "low_confidence"]]);
+});
+
+test("stages selected Asket candidates in sequence and refreshes active carts after each success", async () => {
+  const calls = [];
+  const activeCartUpdates = [];
+
+  const result = await stageSelectedAsketCandidates({
+    auditLogPath: "audit.jsonl",
+    page: { name: "playwright-page" },
+    selectedCandidates: [
+      {
+        id: "first",
+        productUrl: "https://www.asket.com/products/the-t-shirt",
+        size: "M",
+        title: "The T-Shirt",
+      },
+      {
+        id: "second",
+        productId: "the-overshirt",
+        size: "L",
+        title: "The Overshirt",
+      },
+    ],
+    async stageCartItem(payload) {
+      calls.push(payload);
+      return {
+        productUrl:
+          payload.productUrl ?? `https://www.asket.com/products/${payload.productId}`,
+        retailer: "Asket",
+        size: payload.size,
+        status: "success",
+      };
+    },
+    async refreshActiveCarts(payload) {
+      activeCartUpdates.push(payload);
+      return [{ itemCount: payload.stagedCount, retailer: payload.retailer }];
+    },
+  });
+
+  assert.deepEqual(
+    calls.map((call) => [call.productUrl, call.productId, call.size, call.auditLogPath]),
+    [
+      ["https://www.asket.com/products/the-t-shirt", undefined, "M", "audit.jsonl"],
+      [undefined, "the-overshirt", "L", "audit.jsonl"],
+    ],
+  );
+  assert.deepEqual(
+    activeCartUpdates.map((update) => [update.retailer, update.stagedCount, update.cartUrl]),
+    [
+      ["Asket", 1, ASKET_CART_URL],
+      ["Asket", 2, ASKET_CART_URL],
+    ],
+  );
+  assert.equal(result.action, "asket_staging_result");
+  assert.equal(result.stagedCount, 2);
+  assert.equal(result.totalSelected, 2);
+  assert.deepEqual(result.activeCarts, [{ itemCount: 2, retailer: "Asket" }]);
+  assert.deepEqual(result.resultCard, {
+    openCartLink: {
+      href: ASKET_CART_URL,
+      label: "Open cart on Asket",
+    },
+    retailer: "Asket",
+    stagedCount: 2,
+    totalSelected: 2,
+    type: "asket_staging_result_card",
+  });
+});
+
+test("does not refresh active carts for unsuccessful staging results", async () => {
+  const updates = [];
+
+  const result = await stageSelectedAsketCandidates({
+    selectedCandidates: [
+      {
+        productUrl: "https://www.asket.com/products/the-t-shirt",
+        size: "M",
+      },
+      {
+        productUrl: "https://www.asket.com/products/the-shirt",
+        size: "M",
+      },
+    ],
+    async stageCartItem({ productUrl }) {
+      return {
+        productUrl,
+        retailer: "Asket",
+        status: productUrl.endsWith("the-t-shirt") ? "out_of_stock" : "success",
+      };
+    },
+    async refreshActiveCarts(payload) {
+      updates.push(payload);
+    },
+  });
+
+  assert.equal(result.stagedCount, 1);
+  assert.deepEqual(
+    result.results.map(({ result: stagingResult }) => stagingResult.status),
+    ["out_of_stock", "success"],
+  );
+  assert.deepEqual(
+    updates.map((update) => update.stagedCount),
+    [1],
+  );
+});
+
+test("returns an Asket result card for zero selected candidates without staging", async () => {
+  let touchedCart = false;
+
+  const result = await stageSelectedAsketCandidates({
+    selectedCandidates: [],
+    async stageCartItem() {
+      touchedCart = true;
+    },
+  });
+
+  assert.equal(touchedCart, false);
+  assert.equal(result.stagedCount, 0);
+  assert.deepEqual(renderAsketStagingResultCard({ stagedCount: 0, totalSelected: 0 }), {
+    openCartLink: {
+      href: ASKET_CART_URL,
+      label: "Open cart on Asket",
+    },
+    retailer: "Asket",
+    stagedCount: 0,
+    totalSelected: 0,
+    type: "asket_staging_result_card",
+  });
 });
 
 function failSearchTool() {

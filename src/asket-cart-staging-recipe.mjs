@@ -2,9 +2,11 @@ import {
   appendShoppingAuditEntry,
   flushShoppingAuditLog,
 } from "./shopping-audit-log.mjs";
+import { recordStagedCartItem } from "./shopping-active-carts-strip.mjs";
 
 export const ASKET_RETAILER = "Asket";
 export const ASKET_BASE_PRODUCT_URL = "https://www.asket.com/products";
+export const ASKET_CART_URL = "https://www.asket.com/en-dk/cart";
 export const ASKET_CART_STAGING_STATUSES = Object.freeze([
   "success",
   "out_of_stock",
@@ -61,6 +63,8 @@ export async function stageAsketCartItem({
   flushAudit = flushShoppingAuditLog,
   selectors = createAsketCartStagingSelectors(size),
   navigationWaitUntil = "domcontentloaded",
+  activeCarts,
+  now = () => new Date(),
 } = {}) {
   validatePage(page);
   const normalizedSize = normalizeNonEmptyString(size, "size");
@@ -138,8 +142,16 @@ export async function stageAsketCartItem({
     }
 
     auditStep(audit, auditLogPath, "cart_add", "succeeded");
+    const activeCartRow = activeCarts
+      ? recordStagedCartItem(activeCarts, {
+          cartUrl: ASKET_CART_URL,
+          retailer: ASKET_RETAILER,
+          stagedAt: now(),
+        })
+      : undefined;
     return {
       ...resultBase,
+      ...(activeCartRow ? { activeCartRow } : {}),
       status: "success",
     };
   } catch (err) {

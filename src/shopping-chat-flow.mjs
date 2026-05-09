@@ -1,7 +1,9 @@
 import { updateShoppingProfile } from "./shopping-profile.mjs";
+import { ASKET_RETAILER, stageAsketCartItem } from "./asket-cart-staging-recipe.mjs";
 
 export const SHOPPING_CHAT_LOW_CONFIDENCE_MESSAGE =
   "I found shopping intent, but I am not confident enough to make a proposal yet.";
+export const ASKET_CART_URL = "https://www.asket.com/cart";
 
 const DEFAULT_MIN_PROPOSAL_CONFIDENCE = 0.7;
 const DEFAULT_PROFILE_CONFIRMATION_MESSAGE = "Got it. I saved that to your shopping profile.";
@@ -238,6 +240,78 @@ export function createProfileConfirmationCard(profileFact) {
       profileKey: normalized.profileKey,
       value: normalized.value,
     },
+export async function stageSelectedAsketCandidates({
+  selectedCandidates,
+  page,
+  auditLogPath,
+  stageCartItem = stageAsketCartItem,
+  refreshActiveCarts,
+  renderResultCard = renderAsketStagingResultCard,
+  cartUrl = ASKET_CART_URL,
+} = {}) {
+  const candidates = normalizeSelectedCandidates(selectedCandidates);
+
+  if (typeof stageCartItem !== "function") {
+    throw new TypeError("stageCartItem must be a function.");
+  }
+
+  const results = [];
+  let stagedCount = 0;
+  let activeCarts;
+
+  for (const candidate of candidates) {
+    const result = await stageCartItem({
+      auditLogPath,
+      page,
+      productId: candidate.productId,
+      productUrl: candidate.productUrl,
+      size: candidate.size,
+    });
+    results.push({ candidate, result });
+
+    if (result?.status === "success") {
+      stagedCount += 1;
+      if (typeof refreshActiveCarts === "function") {
+        activeCarts = await refreshActiveCarts({
+          cartUrl,
+          lastResult: result,
+          retailer: ASKET_RETAILER,
+          stagedCount,
+        });
+      }
+    }
+  }
+
+  return {
+    action: "asket_staging_result",
+    activeCarts,
+    cartUrl,
+    resultCard: await renderResultCard({
+      cartUrl,
+      results,
+      stagedCount,
+      totalSelected: candidates.length,
+    }),
+    results,
+    stagedCount,
+    totalSelected: candidates.length,
+  };
+}
+
+export function renderAsketStagingResultCard({
+  stagedCount,
+  totalSelected,
+  cartUrl = ASKET_CART_URL,
+} = {}) {
+  return {
+    openCartLink: {
+      href: normalizeUrl(cartUrl, "cartUrl"),
+      label: "Open cart on Asket",
+    },
+    retailer: ASKET_RETAILER,
+    stagedCount: normalizeNonNegativeInteger(stagedCount, "stagedCount"),
+    totalSelected: normalizeNonNegativeInteger(totalSelected, "totalSelected"),
+    type: "asket_staging_result_card",
   };
 }
 
@@ -712,6 +786,69 @@ function normalizeMessage(message) {
     throw new TypeError("message must be a non-empty string.");
   }
   return message.trim();
+}
+
+function normalizeSelectedCandidates(selectedCandidates) {
+  if (!Array.isArray(selectedCandidates)) {
+    throw new TypeError("selectedCandidates must be an array.");
+  }
+  return selectedCandidates.map((candidate, index) => normalizeSelectedCandidate(candidate, index));
+}
+
+function normalizeSelectedCandidate(candidate, index) {
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+    throw new TypeError(`selectedCandidates[${index}] must be an object.`);
+  }
+
+  const productUrl =
+    candidate.productUrl === undefined
+      ? undefined
+      : normalizeUrl(candidate.productUrl, `selectedCandidates[${index}].productUrl`);
+  const productId =
+    candidate.productId === undefined
+      ? undefined
+      : normalizeNonEmptyString(candidate.productId, `selectedCandidates[${index}].productId`);
+
+  if (!productUrl && !productId) {
+    throw new TypeError(
+      `selectedCandidates[${index}] must include productUrl or productId.`,
+    );
+  }
+
+  return {
+    ...(candidate.id === undefined
+      ? {}
+      : { id: normalizeNonEmptyString(candidate.id, `selectedCandidates[${index}].id`) }),
+    ...(productId === undefined ? {} : { productId }),
+    ...(productUrl === undefined ? {} : { productUrl }),
+    size: normalizeNonEmptyString(candidate.size, `selectedCandidates[${index}].size`),
+    ...(candidate.title === undefined
+      ? {}
+      : { title: normalizeNonEmptyString(candidate.title, `selectedCandidates[${index}].title`) }),
+  };
+}
+
+function normalizeNonEmptyString(value, field) {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new TypeError(`${field} must be a non-empty string.`);
+  }
+  return value.trim();
+}
+
+function normalizeNonNegativeInteger(value, field) {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new TypeError(`${field} must be a non-negative integer.`);
+  }
+  return value;
+}
+
+function normalizeUrl(value, field) {
+  const normalized = normalizeNonEmptyString(value, field);
+  try {
+    return new URL(normalized).toString();
+  } catch {
+    throw new TypeError(`${field} must be a valid URL.`);
+  }
 }
 
 function escapeRegExp(value) {
