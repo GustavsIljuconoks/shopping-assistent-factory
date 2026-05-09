@@ -21,6 +21,7 @@ test("creates an Asket product URL from a product id", () => {
 test("navigates, selects the requested size, adds to cart, and audits each step", async () => {
   const dir = await mkdtemp(join(tmpdir(), "asket-cart-staging-"));
   const auditPath = join(dir, "audit.jsonl");
+  const activeCarts = new Map();
   const selectors = createAsketCartStagingSelectors("M");
   const page = new FakePage({
     locators: {
@@ -31,7 +32,9 @@ test("navigates, selects the requested size, adds to cart, and audits each step"
 
   try {
     const result = await stageAsketCartItem({
+      activeCarts,
       auditLogPath: auditPath,
+      now: () => new Date("2026-05-09T13:05:00.000Z"),
       page,
       productUrl: "https://www.asket.com/products/the-t-shirt",
       selectors,
@@ -40,6 +43,13 @@ test("navigates, selects the requested size, adds to cart, and audits each step"
     const auditEntries = await readShoppingAuditLog(auditPath);
 
     assert.equal(result.status, "success");
+    assert.deepEqual(result.activeCartRow, {
+      cartUrl: "https://www.asket.com/en-dk/cart",
+      itemCount: 1,
+      lastStagedAt: "2026-05-09T13:05:00.000Z",
+      retailer: "Asket",
+    });
+    assert.deepEqual([...activeCarts.values()], [result.activeCartRow]);
     assert.deepEqual(page.events, [
       ["goto", "https://www.asket.com/products/the-t-shirt"],
       ["click", selectors.size[0]],
